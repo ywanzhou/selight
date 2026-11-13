@@ -1,6 +1,10 @@
 import { useAppStore } from '../state/store'
 import { ImportIcon, PlusIcon } from './icons'
 
+function showError(e: unknown): void {
+  window.alert(e instanceof Error ? e.message : String(e))
+}
+
 export default function Toolbar() {
   const { state, openBatch, createBatch, importDirectory } = useAppStore()
   const { batches, batchId, counts, loading } = state
@@ -22,8 +26,10 @@ export default function Toolbar() {
       <select
         className="tb-select"
         value={batchId ?? ''}
-        disabled={batches.length === 0}
-        onChange={(e) => void openBatch(Number(e.target.value))}
+        disabled={batches.length === 0 || loading}
+        onChange={(e) => {
+          openBatch(Number(e.target.value)).catch(showError)
+        }}
         aria-label="选择批次"
       >
         {batches.length === 0 && <option value="">无批次</option>}
@@ -38,7 +44,9 @@ export default function Toolbar() {
         type="button"
         className="tb-btn"
         disabled={loading}
-        onClick={() => void createBatch()}
+        onClick={() => {
+          createBatch().catch(showError)
+        }}
       >
         <PlusIcon />
         新建批次
@@ -48,18 +56,15 @@ export default function Toolbar() {
         type="button"
         className="tb-btn"
         disabled={batchId === null || loading}
-        onClick={() => void handleImport()}
+        onClick={() => {
+          handleImport().catch(showError)
+        }}
       >
         <ImportIcon />
         导入文件夹
       </button>
 
-      <button
-        type="button"
-        className="tb-btn"
-        disabled
-        title="即将推出"
-      >
+      <button type="button" className="tb-btn" disabled title="即将推出">
         导出
       </button>
 

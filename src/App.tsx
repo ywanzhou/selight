@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Toolbar from './components/Toolbar'
 import { FolderIcon, PlusIcon } from './components/icons'
 import { AppStoreProvider, useAppStore } from './state/store'
@@ -42,7 +42,15 @@ function EmptyState() {
       <FolderIcon size={44} className="empty-icon" />
       <h2>还没有批次</h2>
       <p>新建一个批次，然后导入照片文件夹开始分类。</p>
-      <button type="button" className="tb-btn" onClick={() => void createBatch()}>
+      <button
+        type="button"
+        className="tb-btn"
+        onClick={() =>
+          createBatch().catch((e: unknown) =>
+            window.alert(e instanceof Error ? e.message : String(e))
+          )
+        }
+      >
         <PlusIcon />
         新建批次
       </button>
@@ -50,31 +58,68 @@ function EmptyState() {
   )
 }
 
+function ErrorState() {
+  const { state, boot } = useAppStore()
+  return (
+    <div className="empty-state" role="alert">
+      <FolderIcon size={44} className="empty-icon" />
+      <h2>加载失败</h2>
+      <p>{state.error ?? '未知错误'}</p>
+      <button type="button" className="tb-btn" onClick={() => void boot()}>
+        重试
+      </button>
+    </div>
+  )
+}
+
 function RecoveryDialog() {
-  const { importDirectory } = useAppStore()
+  const { recoveryImport } = useAppStore()
   const [open, setOpen] = useState(false)
+  const reimportButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(
     () => window.selight.onDbRecovered(() => setOpen(true)),
     []
   )
 
+  // Focus the default action on open; Esc dismisses, same as 以后再说.
+  useEffect(() => {
+    if (!open) return
+    reimportButtonRef.current?.focus()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open])
+
   if (!open) return null
   return (
-    <div className="modal-overlay" role="alertdialog" aria-modal="true">
-      <div className="modal-card">
-        <h2>数据库已恢复</h2>
-        <p>本地数据库损坏后已重建为空库，请重新导入照片文件夹。</p>
+    // Overlay clicks deliberately do not close the dialog, to prevent accidental dismiss.
+    <div className="modal-overlay">
+      <div
+        className="modal-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="recovery-title"
+        aria-describedby="recovery-desc"
+      >
+        <h2 id="recovery-title">数据库已恢复</h2>
+        <p id="recovery-desc">本地数据库损坏后已重建为空库，请重新导入照片文件夹。</p>
         <div className="modal-actions">
           <button type="button" className="tb-btn" onClick={() => setOpen(false)}>
             以后再说
           </button>
           <button
+            ref={reimportButtonRef}
             type="button"
             className="tb-btn tb-btn-primary"
-            onClick={async () => {
+            onClick={() => {
               setOpen(false)
-              await importDirectory()
+              // recoveryImport creates a batch first when the rebuilt DB has none.
+              recoveryImport().catch((e: unknown) =>
+                window.alert(e instanceof Error ? e.message : String(e))
+              )
             }}
           >
             重新导入
@@ -87,12 +132,13 @@ function RecoveryDialog() {
 
 function Shell() {
   const { state } = useAppStore()
-  const showEmpty = !state.loading && state.batchId === null
 
   return (
     <div className="app-shell">
       <Toolbar />
-      {showEmpty ? (
+      {state.error !== null ? (
+        <ErrorState />
+      ) : !state.loading && state.batchId === null ? (
         <EmptyState />
       ) : (
         <div className="app-body">
@@ -108,7 +154,7 @@ function Shell() {
 
 export default function App() {
   return (
-    <AppStoreProvider>
+    <AppStoreProvider api={window.selight}>
       <Shell />
     </AppStoreProvider>
   )
