@@ -8,6 +8,7 @@ import { createBatch } from '../../electron/domain/batches'
 import { createFolder, softDeleteFolder } from '../../electron/domain/folders'
 import { counts, listPhotos, upsertPhoto, type PhotoInput } from '../../electron/domain/photos'
 import {
+  MixedBatchError,
   assignToFolder,
   moveToTrash,
   restoreFromTrash
@@ -273,5 +274,69 @@ describe('classification actions', () => {
     expect(assignToFolder(db, [photoId, 999_999], folder.id)).toBe(1)
     expect(listActions(db, batch.id)).toHaveLength(1)
     expect(distinctGroups(db, batch.id)).toBe(1)
+  })
+
+  it('rejects mixed-batch photo ids in all three actions and rolls everything back', () => {
+    const db = tempDb()
+    const batchA = createBatch(db, 'a')
+    const batchB = createBatch(db, 'b')
+    const folderA = createFolder(db, batchA.id, 'fa')
+    const photoA = addPhoto(db, batchA.id, 'E:/a/1.jpg')
+    const photoB = addPhoto(db, batchB.id, 'E:/b/1.jpg')
+    const mixed = [photoA, photoB]
+
+    expect(() => assignToFolder(db, mixed, folderA.id)).toThrowError(MixedBatchError)
+    expect(() => moveToTrash(db, mixed)).toThrowError(MixedBatchError)
+    expect(() => restoreFromTrash(db, mixed)).toThrowError(MixedBatchError)
+
+    // The transaction rolled back: no photo changed state and no audit row was written.
+    expect(photoState(db, photoA)).toEqual({ status: 'inbox', folder_id: null })
+    expect(photoState(db, photoB)).toEqual({ status: 'inbox', folder_id: null })
+    expect(actionCount(db)).toBe(0)
+  })
+
+  it('assignToFolder migrates a photo between folders and logs folder/A → folder/B', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folderA = createFolder(db, batch.id, 'A')
+    const folderB = createFolder(db, batch.id, 'B')
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+
+    assignToFolder(db, [photoId], folderA.id)
+    expect(assignToFolder(db, [photoId], folderB.id)).toBe(1)
+
+    expect(photoState(db, photoId)).toEqual({ status: 'folder', folder_id: folderB.id })
+    const migration = listActions(db, batch.id).at(-1)!
+    expect(migration).toMatchObject({
+      from_status: 'folder',
+      from_folder_id: folderA.id,
+      to_status: 'folder',
+      to_folder_id: folderB.id
+    })
+  })
+
+  it('restore fallback to a soft-deleted folder writes an explicit trash/folder → inbox/NULL audit row', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, 'gone')
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+    assignToFolder(db, [photoId], folder.id)
+    moveToTrash(db, [photoId])
+    softDeleteFolder(db, folder.id)
+
+    restoreFromTrash(db, [photoId])
+
+    const restoreAction = listActions(db, batch.id).at(-1)!
+    expect({
+      from_status: restoreAction.from_status,
+      from_folder_id: restoreAction.from_folder_id,
+      to_status: restoreAction.to_status,
+      to_folder_id: restoreAction.to_folder_id
+    }).toEqual({
+      from_status: 'trash',
+      from_folder_id: folder.id,
+      to_status: 'inbox',
+      to_folder_id: null
+    })
   })
 })

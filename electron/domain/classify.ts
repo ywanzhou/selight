@@ -8,6 +8,13 @@ interface PhotoState {
   folder_id: number | null
 }
 
+export class MixedBatchError extends Error {
+  constructor() {
+    super('classification actions cannot span multiple batches')
+    this.name = 'MixedBatchError'
+  }
+}
+
 interface Target {
   status: PhotoStatus
   folderId: number | null
@@ -45,7 +52,12 @@ function applyActions(
     const photos = loadPhotos(db, photoIds)
     if (photos.length === 0) return 0
 
-    const groupId = nextGroupId(db, photos[0].batch_id)
+    // A group id is taken from one batch's sequence; mixing batches would write another
+    // batch's photos under a foreign group and corrupt undo scoped by (batch_id, group).
+    const batchId = photos[0].batch_id
+    if (!photos.every((photo) => photo.batch_id === batchId)) throw new MixedBatchError()
+
+    const groupId = nextGroupId(db, batchId)
     const now = Date.now()
     const updatePhoto = db.prepare(
       'UPDATE photos SET status = ?, folder_id = ?, updated_at = ? WHERE id = ?'
@@ -60,7 +72,7 @@ function applyActions(
       const target = resolveTarget(photo)
       updatePhoto.run(target.status, target.folderId, now, photo.id)
       insertAction.run(
-        photo.batch_id,
+        batchId,
         groupId,
         photo.id,
         photo.status,
