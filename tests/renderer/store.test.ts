@@ -78,6 +78,48 @@ function harness(api: SelightApi) {
   }
 }
 
+// Models real React commit timing: dispatch only queues actions, and the queued
+// batch is reduced on the next microtask. Any getState() call reached without an
+// await boundary after dispatch therefore still observes the pre-dispatch state —
+// exactly the gap that made switchView(savedView) no-op during boot view restore
+// (see the explicit-pull comment in src/state/store.ts boot()). The synchronous
+// harness above cannot reproduce this, which is why this variant exists.
+function staleHarness(api: SelightApi) {
+  let committed: AppState = {
+    batches: [],
+    batchId: null,
+    view: { kind: 'inbox' },
+    selection: [],
+    folders: [],
+    photos: [],
+    counts: null,
+    loading: true,
+    error: null
+  }
+  let queued: Parameters<typeof reducer>[1][] = []
+  let scheduled = false
+  const flush = () => {
+    scheduled = false
+    for (const action of queued) committed = reducer(committed, action)
+    queued = []
+  }
+  const dispatch = vi.fn((action: Parameters<typeof reducer>[1]) => {
+    queued.push(action)
+    if (!scheduled) {
+      scheduled = true
+      queueMicrotask(flush)
+    }
+  })
+  const deps: ThunkDeps = { api, getState: () => committed, dispatch }
+  return {
+    deps,
+    get state(): AppState {
+      return committed
+    },
+    dispatch
+  }
+}
+
 const batch: BatchRow = { id: 1, name: '2026-11-13', createdAt: 1, lastOpenedAt: 2 }
 const zeroCounts: Counts = { total: 0, inbox: 0, folder: 0, trash: 0 }
 const opened: BatchState = { batch, folders: [], counts: zeroCounts, photos: [] }
@@ -256,6 +298,64 @@ describe('store boot chain', () => {
     expect(h.state.error).toBeNull()
     expect(h.state.loading).toBe(false)
     expect(h.state.batchId).toBeNull()
+  })
+
+  it('restores a folder view under deferred state commits without a getState no-op', async () => {
+    // Regression guard for the render-gap bug caught by the Task 16 CDP smoke:
+    // boot dispatched "opened" and then called switchView(), whose getState() still
+    // read batchId === null because React had not committed, so the view pull never
+    // happened. The stale harness below reproduces that timing under bare Node.
+    const listView = vi.fn(async () => [])
+    const open = vi.fn(async () => opened2)
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch2, batch]),
+      openBatch: open,
+      getSession: vi.fn(
+        async () => ({ batchId: 2, view: { kind: 'folder', folderId: 9 } })
+      ),
+      listView,
+      counts: vi.fn(async () => zeroCounts),
+      listFolders: vi.fn(async () => [folder])
+    })
+    const h = staleHarness(api)
+
+    await boot(h.deps)
+
+    // The pull must be explicit and keyed to the session batchId. A regressed
+    // switchView(savedView) implementation never calls listView (stale null
+    // batchId early-returns), so this assertion distinguishes the two paths.
+    expect(listView).toHaveBeenCalledWith(2, { kind: 'folder', folderId: 9 })
+    expect(open.mock.invocationCallOrder[0]).toBeLessThan(
+      listView.mock.invocationCallOrder[0]
+    )
+    expect(h.state.batchId).toBe(2)
+    expect(h.state.view).toEqual({ kind: 'folder', folderId: 9 })
+    expect(h.state.loading).toBe(false)
+    expect(h.state.error).toBeNull()
+  })
+
+  it('does not trust a saved folder that belongs to a different batch and falls back to inbox', async () => {
+    // folder 9 exists in batch 1; the session points at batch 2 with the same
+    // folderId, so boot must scope its check to the opened batch and stay on inbox.
+    const folderInBatch1: FolderRow = { ...folder, batchId: 1 }
+    const listView = vi.fn(async () => [])
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch2, batch]),
+      openBatch: vi.fn(async (id: number) =>
+        id === 2 ? { ...opened2, folders: [] } : { ...opened, folders: [folderInBatch1] }
+      ),
+      getSession: vi.fn(
+        async () => ({ batchId: 2, view: { kind: 'folder', folderId: 9 } })
+      ),
+      listView
+    })
+    const h = harness(api)
+
+    await boot(h.deps)
+
+    expect(h.state.batchId).toBe(2)
+    expect(h.state.view).toEqual({ kind: 'inbox' })
+    expect(listView).not.toHaveBeenCalled()
   })
 })
 
