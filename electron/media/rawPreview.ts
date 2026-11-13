@@ -59,7 +59,11 @@ export class ExiftoolReader implements ExifReader {
     const extracted = await this.extractPreview(photo.absPath)
     const rotated = await rotateJpegBuffer(extracted, photo.orientation)
     await fs.mkdir(cacheDir, { recursive: true })
-    await fs.writeFile(out, rotated)
+    // Sibling .tmp + rename: a crash mid-write cannot leave a truncated preview
+    // that the access()-based cache check above would serve forever.
+    const tmp = `${out}.tmp`
+    await fs.writeFile(tmp, rotated)
+    await fs.rename(tmp, out)
     return out
   }
 }

@@ -104,7 +104,22 @@ describe('resolveMediaPath — thumb route', () => {
     const id = insertPhoto(db, outside, 'a.jpg')
     touch(path.join(roots.thumbDir, `${id}.jpg`))
 
-    for (const bad of [999, 0, -1, 1.5, 'abc', '', '..', '../outside/escape', '../../escape', '1/../evil']) {
+    for (const bad of [
+      999,
+      0,
+      -1,
+      1.5,
+      'abc',
+      '',
+      '..',
+      '../outside/escape',
+      '../../escape',
+      '1/../evil',
+      // The placeholder sidecar must never be servable through the thumb route.
+      '1.jpg.placeholder',
+      // Percent-encoded traversal is still a non-numeric id.
+      '%2e%2e%2f1'
+    ]) {
       expect(resolveMediaPath(db, roots, 'thumb', bad as never), `id=${JSON.stringify(bad)}`).toBeNull()
     }
   })
@@ -160,7 +175,19 @@ describe('resolveMediaPath — photo route', () => {
 
   it('rejects unknown, non-numeric and traversal ids', () => {
     const { db, roots } = tempLayout()
-    for (const bad of [999, 0, -1, 1.5, 'abc', '', '..', '../../etc/passwd', '1/../../x']) {
+    for (const bad of [
+      999,
+      0,
+      -1,
+      1.5,
+      'abc',
+      '',
+      '..',
+      '../../etc/passwd',
+      '1/../../x',
+      '1.jpg.placeholder',
+      '%2e%2e%2f1'
+    ]) {
       expect(resolveMediaPath(db, roots, 'photo', bad as never), `id=${JSON.stringify(bad)}`).toBeNull()
     }
   })

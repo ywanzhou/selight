@@ -43,6 +43,30 @@ async function atomicWrite(file: string, data: Buffer): Promise<void> {
   await fs.rename(tmp, file)
 }
 
+// Sidecar marker persisted next to the thumbnail so the placeholder status
+// survives restarts: v1 has no retry flow, and without the marker a transient
+// failure would cache-hit an indistinguishable placeholder forever.
+function markerPath(thumbPath: string): string {
+  return `${thumbPath}.placeholder`
+}
+
+async function writePlaceholderMarker(thumbPath: string): Promise<void> {
+  await fs.writeFile(markerPath(thumbPath), '')
+}
+
+async function removePlaceholderMarker(thumbPath: string): Promise<void> {
+  await fs.rm(markerPath(thumbPath), { force: true })
+}
+
+async function hasPlaceholderMarker(thumbPath: string): Promise<boolean> {
+  try {
+    await fs.access(markerPath(thumbPath))
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function fallbackPlaceholder(
   out: string,
   photoId: number,
@@ -50,6 +74,7 @@ async function fallbackPlaceholder(
 ): Promise<ThumbnailResult> {
   console.error(`[selight] thumbnail generation failed for photo ${photoId}`, cause)
   await atomicWrite(out, Buffer.from(PLACEHOLDER_JPEG_BASE64, 'base64'))
+  await writePlaceholderMarker(out)
   return { path: out, placeholder: true }
 }
 
@@ -61,7 +86,7 @@ export async function ensureThumbnail(
   const out = path.join(cacheDir, `${photo.id}.jpg`)
   try {
     await fs.access(out)
-    return { path: out, placeholder: false }
+    return { path: out, placeholder: await hasPlaceholderMarker(out) }
   } catch {
     // Cache miss: generate below.
   }
@@ -98,6 +123,8 @@ export async function ensureThumbnail(
       throw new Error(`nativeImage decoded an empty image for ${photo.absPath}`)
     }
     await atomicWrite(out, resized.toJPEG(JPEG_QUALITY))
+    // A successful regeneration clears any marker left by an earlier failure.
+    await removePlaceholderMarker(out)
     return { path: out, placeholder: false }
   } catch (err) {
     // Any failure — RawPreviewError, jpeg-js rotation error, fs SystemError — degrades
