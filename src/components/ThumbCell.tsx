@@ -1,0 +1,122 @@
+import { useEffect, useState, type CSSProperties } from 'react'
+import type { MediaKind, PhotoRow } from '../../electron/shared/api'
+import type { ToggleOptions } from '../state/selection'
+import { CheckIcon, WarningIcon } from './icons'
+
+// mediaUrl is an IPC round trip; cells mount/unmount while scrolling, so cache
+// the resolved selight:// URL per photo+kind to avoid re-asking the main process.
+const urlCache = new Map<string, string>()
+
+function useMediaUrl(id: number, kind: MediaKind): string | undefined {
+  const key = `${kind}:${id}`
+  const [url, setUrl] = useState(() => urlCache.get(key))
+  useEffect(() => {
+    let cancelled = false
+    const cached = urlCache.get(key)
+    if (cached !== undefined) {
+      setUrl(cached)
+      return
+    }
+    void window.selight.mediaUrl(id, kind).then((resolved) => {
+      urlCache.set(key, resolved)
+      if (!cancelled) setUrl(resolved)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [id, kind, key])
+  return url
+}
+
+export interface ThumbCellData {
+  photos: PhotoRow[]
+  selected: Set<number>
+  anchorId: number | null
+  onToggle: (id: number, options: ToggleOptions) => void
+}
+
+interface GridCellProps extends ThumbCellData {
+  rowIndex: number
+  columnIndex: number
+  style: CSSProperties
+  ariaAttributes: { role: string; 'aria-colindex': number }
+}
+
+function stripExt(filename: string): string {
+  return filename.replace(/\.[^.]+$/, '')
+}
+
+function ThumbCell({ photo, isAnchor, isSelected }: {
+  photo: PhotoRow
+  isAnchor: boolean
+  isSelected: boolean
+}) {
+  const src = useMediaUrl(photo.id, 'thumb')
+  const classes = ['thumb', isAnchor ? 'sel' : isSelected ? 'batch' : '']
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <div className={classes} title={photo.filename}>
+      {src !== undefined && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          // Missing or not-yet-built thumbs keep the gray placeholder instead of a broken-image glyph.
+          onError={(e) => {
+            e.currentTarget.style.visibility = 'hidden'
+          }}
+        />
+      )}
+      {isSelected && (
+        <span className={isAnchor ? 'check' : 'check orange'}>
+          <CheckIcon size={10} />
+        </span>
+      )}
+      {photo.missing === 1 && (
+        <span className="thumb-warn" title="原文件缺失">
+          <WarningIcon size={10} />
+        </span>
+      )}
+      <span className="fname-tag">{stripExt(photo.filename)}</span>
+    </div>
+  )
+}
+
+// react-window renders a fixed column count, so the final row may ask for a
+// cell beyond the data; keep the hook-containing component below this guard so
+// React's rules of hooks are never violated.
+export default function GridCell({
+  rowIndex,
+  columnIndex,
+  style,
+  ariaAttributes,
+  photos,
+  selected,
+  anchorId,
+  onToggle
+}: GridCellProps) {
+  const photo = photos[rowIndex * 2 + columnIndex]
+  if (photo === undefined) return null
+
+  return (
+    <div
+      className="thumb-cell"
+      style={style}
+      {...ariaAttributes}
+      onClick={(e) =>
+        onToggle(photo.id, {
+          ctrl: e.ctrlKey || e.metaKey,
+          shift: e.shiftKey
+        })
+      }
+    >
+      <ThumbCell
+        photo={photo}
+        isAnchor={photo.id === anchorId}
+        isSelected={selected.has(photo.id)}
+      />
+    </div>
+  )
+}

@@ -112,8 +112,19 @@ export function ChevronRightIcon(props: IconProps) {
 
 export function CheckIcon(props: IconProps) {
   return (
-    <Svg strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <Svg strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </Svg>
+  )
+}
+
+// SF Symbol-style warning triangle for the missing-file corner badge.
+export function WarningIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 4l9 15.5H3L12 4z" />
+      <path d="M12 10v4" />
+      <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none" />
     </Svg>
   )
 }

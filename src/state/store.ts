@@ -40,6 +40,7 @@ type Action =
       folders: FolderRow[]
       counts: Counts
     }
+  | { type: 'selected'; ids: number[] }
   | { type: 'loading'; loading: boolean }
   | { type: 'error'; error: string }
 
@@ -79,6 +80,9 @@ export function reducer(state: AppState, action: Action): AppState {
         folders: action.folders,
         counts: action.counts
       }
+    case 'selected':
+      // Mirror of the selection model owned by useSelection in ThumbPane.
+      return { ...state, selection: action.ids }
     case 'loading':
       return { ...state, loading: action.loading }
     case 'error':
@@ -172,6 +176,7 @@ export async function boot(deps: ThunkDeps): Promise<void> {
 
 export interface AppStore {
   state: AppState
+  setSelection(ids: number[]): void
   boot(): Promise<void>
   refresh(): Promise<void>
   openBatch(batchId: number): Promise<void>
@@ -211,6 +216,7 @@ export function AppStoreProvider({
 
   const store: AppStore = {
     state,
+    setSelection: (ids) => dispatch({ type: 'selected', ids }),
     boot: () => boot(deps),
     refresh: () => refresh(deps),
     openBatch: (batchId) => openBatch(deps, batchId),

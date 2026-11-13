@@ -1,21 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import Toolbar from './components/Toolbar'
+import ThumbPane from './components/ThumbPane'
 import { FolderIcon, PlusIcon } from './components/icons'
 import { AppStoreProvider, useAppStore } from './state/store'
 
-// Placeholder panes: real ThumbPane/PreviewPane/FolderCards land in Tasks 13-15.
+// Placeholder panes: real PreviewPane/FolderCards land in Tasks 14-15.
 // The shell geometry, frosted sidebars and hairline dividers are already final.
-function ThumbPane() {
-  return (
-    <aside className="sidebar left frosted hairline-right">
-      <div className="side-head">
-        <span>待分类</span>
-      </div>
-      <p className="pane-placeholder">缩略图即将上线</p>
-    </aside>
-  )
-}
-
 function PreviewPane() {
   return (
     <main className="preview-pane">
