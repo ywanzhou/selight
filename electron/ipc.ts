@@ -11,8 +11,7 @@ import {
 import { undoLastGroup } from './domain/actions'
 import { importScanned, scanDirectory, type ExifReader } from './scanner'
 import type { MediaQueue } from './media/queue'
-import type { MediaRoots } from './media/resolve'
-import type { BatchState, ImportResult, SelightApi } from './shared/api'
+import type { BatchState, ImportResult, SelightHandlers } from './shared/api'
 
 // No electron import in this file: every dependency is injected so the whole handler
 // contract runs under bare Node in tests/ipc.contract.test.ts. Domain errors are never
@@ -21,7 +20,6 @@ import type { BatchState, ImportResult, SelightApi } from './shared/api'
 export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
-  roots: MediaRoots
   exifReader: ExifReader
 }
 
@@ -66,7 +64,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
   return ids
 }
 
-export function createHandlers(deps: HandlerDeps): SelightApi {
+export function createHandlers(deps: HandlerDeps): SelightHandlers {
   const { db, thumbQueue, exifReader } = deps
 
   return {

@@ -28,7 +28,14 @@ const api: SelightApi = {
     ipcRenderer.invoke(IPC_CHANNELS.classifyAssign, photoIds, folderId),
   trash: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyTrash, photoIds),
   restore: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyRestore, photoIds),
-  undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId)
+  undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId),
+
+  // Main→renderer push. The wrapped unsubscribe removes the exact listener instance.
+  onDbRecovered: (cb) => {
+    const listener = () => cb()
+    ipcRenderer.on(IPC_CHANNELS.dbRecovered, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.dbRecovered, listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('selight', api)

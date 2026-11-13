@@ -34,11 +34,12 @@ export interface ImportResult {
   failures: string[]
 }
 
-// Every method is Promise-returning so the preload can wrap ipcRenderer.invoke 1:1.
-// Batch-scoped calls take batchId explicitly: the handler factory holds no mutable
-// "current batch", keeping it pure and per-batch isolation testable. exportBatch is
-// deliberately absent — Task 17 adds the exporter, its handler and progress event.
-export interface SelightApi {
+// Request/response surface, wrapped 1:1 by ipcRenderer.invoke and implemented by the
+// pure createHandlers factory (which has no webContents and therefore cannot push).
+// Batch-scoped calls take batchId explicitly: the factory holds no mutable "current
+// batch", keeping it pure and per-batch isolation testable. exportBatch is deliberately
+// absent — Task 17 adds the exporter, its handler and progress event.
+export interface SelightHandlers {
   listBatches(): Promise<BatchRow[]>
   createBatch(name?: string): Promise<BatchRow>
   openBatch(batchId: number): Promise<BatchState>
@@ -60,7 +61,15 @@ export interface SelightApi {
   undo(batchId: number): Promise<boolean>
 }
 
-// Channel names shared by preload (invoke) and main (handle), so the two cannot drift.
+// Full window.selight surface: the invoke handlers plus the main→renderer push
+// subscription, which only the preload (holding ipcRenderer) can implement.
+export interface SelightApi extends SelightHandlers {
+  // Subscribe to the DB-corruption-recovery notice; calling the returned function
+  // removes the listener.
+  onDbRecovered(cb: () => void): () => void
+}
+
+// Channel names shared by preload (invoke/on) and main (handle/send), so they cannot drift.
 export const IPC_CHANNELS = {
   batchList: 'selight:batch:list',
   batchCreate: 'selight:batch:create',

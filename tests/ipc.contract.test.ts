@@ -7,7 +7,7 @@ import { openDatabase } from '../electron/db/schema'
 import { createHandlers, type HandlerDeps } from '../electron/ipc'
 import type { ExifReader } from '../electron/scanner'
 import type { MediaQueue } from '../electron/media/queue'
-import type { SelightApi } from '../electron/shared/api'
+import { IPC_CHANNELS, type SelightApi, type SelightHandlers } from '../electron/shared/api'
 
 // This suite is the end-to-end domain chain driven through the pure handler factory.
 // It must never import electron: createHandlers takes every dependency (db, queue,
@@ -19,7 +19,7 @@ const handles: Database[] = []
 const fakeReader: ExifReader = { readOrientation: async () => 1 }
 
 interface Setup {
-  handlers: SelightApi
+  handlers: SelightHandlers
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
 }
@@ -30,11 +30,6 @@ function setup(): Setup {
   const { db } = openDatabase(path.join(dir, 'selight.db'))
   handles.push(db)
 
-  const thumbDir = path.join(dir, 'thumbnails')
-  const previewDir = path.join(dir, 'previews')
-  fs.mkdirSync(thumbDir)
-  fs.mkdirSync(previewDir)
-
   // Recording stand-in for MediaQueue: structural type matches the enqueue/prioritize
   // surface the handlers depend on, and lets tests assert queue wiring without Electron.
   const queueCalls = { enqueue: [] as number[][], prioritize: [] as number[][] }
@@ -43,7 +38,7 @@ function setup(): Setup {
     prioritize: (ids) => queueCalls.prioritize.push([...ids])
   }
 
-  const deps: HandlerDeps = { db, thumbQueue, roots: { thumbDir, previewDir }, exifReader: fakeReader }
+  const deps: HandlerDeps = { db, thumbQueue, exifReader: fakeReader }
   return { handlers: createHandlers(deps), db, queueCalls }
 }
 
@@ -279,5 +274,22 @@ describe('IPC handler contract — full curation chain', () => {
     const { handlers } = setup()
     const batch = await handlers.createBatch()
     expect(await handlers.undo(batch.id)).toBe(false)
+  })
+})
+
+// The preload cannot run under bare Node, so the push-event path is split: the channel
+// constant and the API type shape are pinned here, while the real ipcRenderer.on delivery
+// across the contextBridge (sandbox:true) is proven by the throwaway Electron dev harness.
+describe('window.selight db-recovery push surface', () => {
+  it('pins the recovery channel constant and the onDbRecovered subscription shape', () => {
+    expect(IPC_CHANNELS.dbRecovered).toBe('selight:db:recovered')
+
+    // Type-level structural assertion, erased at runtime but enforced by tsc:
+    // SelightApi must expose onDbRecovered as (cb: () => void) => unsubscribe.
+    const probe: SelightApi['onDbRecovered'] = (cb) => {
+      cb()
+      return () => {}
+    }
+    expect(typeof probe).toBe('function')
   })
 })

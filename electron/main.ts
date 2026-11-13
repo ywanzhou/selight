@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
@@ -6,6 +6,7 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from './db/schema'
 import { ExiftoolReader } from './media/rawPreview'
 import { createThumbnailQueue } from './media/thumbnails'
+import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
 import { createHandlers } from './ipc'
@@ -13,6 +14,8 @@ import { IPC_CHANNELS, type MediaKind, type View } from './shared/api'
 
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
+let thumbQueue: MediaQueue | null = null
+let isQuitting = false
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -58,8 +61,8 @@ app.whenReady().then(() => {
   registerMediaProtocol(db, roots)
 
   const exifReader = new ExiftoolReader()
-  const thumbQueue = createThumbnailQueue(db, roots, exifReader)
-  const handlers = createHandlers({ db, thumbQueue, roots, exifReader })
+  thumbQueue = createThumbnailQueue(db, roots, exifReader)
+  const handlers = createHandlers({ db, thumbQueue, exifReader })
 
   ipcMain.handle(IPC_CHANNELS.batchList, () => handlers.listBatches())
   ipcMain.handle(IPC_CHANNELS.batchCreate, (_event, name?: string) =>
@@ -132,6 +135,13 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
   })
+}).catch((err: unknown) => {
+  // Surface a startup failure instead of leaving the app hanging with no window.
+  dialog.showErrorBox(
+    '择影启动失败',
+    err instanceof Error ? err.stack ?? err.message : String(err)
+  )
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
@@ -140,14 +150,27 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('will-quit', () => {
-  // Deterministic shutdown: close the SQLite handle and release the ExifTool child.
-  try {
-    db?.close()
-  } catch (err) {
-    console.error('[selight] database close failed', err)
-  }
-  exiftool.end().catch((err: unknown) => {
-    console.error('[selight] exiftool shutdown failed', err)
-  })
+// will-quit is synchronous, but ExifTool shutdown is async: prevent the default quit,
+// run cleanup, then re-enter quit. The isQuitting guard makes the second pass proceed.
+app.on('will-quit', (event) => {
+  if (isQuitting) return
+  event.preventDefault()
+  isQuitting = true
+  void (async () => {
+    try {
+      // Stop starting new thumbnail work; in-flight tasks are allowed to finish.
+      thumbQueue?.stop()
+      try {
+        db?.close()
+      } catch (err) {
+        console.error('[selight] database close failed', err)
+      }
+      // Await so the ExifTool child cannot be orphaned when the process exits.
+      await exiftool.end()
+    } catch (err) {
+      console.error('[selight] shutdown cleanup failed', err)
+    } finally {
+      app.quit()
+    }
+  })()
 })

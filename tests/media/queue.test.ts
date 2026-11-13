@@ -182,3 +182,42 @@ describe('MediaQueue.onIdle', () => {
     expect(queue.pending).toHaveLength(0)
   })
 })
+
+describe('MediaQueue.stop', () => {
+  it('never runs ids enqueued or prioritized after stop, leaving them pending', async () => {
+    const calls: number[] = []
+    const queue = new MediaQueue(async (id) => {
+      calls.push(id)
+    })
+
+    queue.stop()
+    queue.enqueue([1, 2])
+    queue.prioritize([3])
+    await flushMicrotasks()
+
+    expect(calls).toEqual([])
+    expect([...queue.pending].sort((a, b) => a - b)).toEqual([1, 2, 3])
+  })
+
+  it('lets in-flight tasks finish, skips queued work, and still fires onIdle', async () => {
+    const g = gate()
+    const calls: number[] = []
+    const queue = new MediaQueue(async (id) => {
+      calls.push(id)
+      if (id === 1) await g.promise
+    }, 1)
+
+    queue.enqueue([1, 2])
+    await flushMicrotasks()
+    expect(calls).toEqual([1])
+
+    queue.stop()
+    const idle = new Promise<void>((resolve) => queue.onIdle(() => resolve()))
+    g.release()
+    await idle
+
+    // In-flight 1 ran to completion; queued 2 was never started after stop.
+    expect(calls).toEqual([1])
+    expect([...queue.pending]).toEqual([2])
+  })
+})

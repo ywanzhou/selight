@@ -4,6 +4,7 @@ export class MediaQueue {
   private readonly queued: number[] = []
   private readonly active = new Set<number>()
   private running = 0
+  private stopped = false
   private readonly idleCallbacks = new Set<() => void>()
 
   constructor(
@@ -37,12 +38,19 @@ export class MediaQueue {
     this.idleCallbacks.add(cb)
   }
 
+  // Shutdown gate: once stopped, enqueue/prioritize may still buffer ids but pump()
+  // never starts another worker, so in-flight tasks finish naturally and nothing queued
+  // after stop runs. Idle still fires when the last in-flight task lands.
+  stop(): void {
+    this.stopped = true
+  }
+
   private isKnown(id: number): boolean {
     return this.active.has(id) || this.queued.includes(id)
   }
 
   private pump(): void {
-    while (this.running < this.concurrency && this.queued.length > 0) {
+    while (!this.stopped && this.running < this.concurrency && this.queued.length > 0) {
       const id = this.queued.shift()!
       this.active.add(id)
       this.running += 1
@@ -54,6 +62,11 @@ export class MediaQueue {
         .finally(() => {
           this.running -= 1
           this.active.delete(id)
+          if (this.stopped) {
+            // Queued ids must stay unstarted, but the last in-flight completion still idles.
+            if (this.running === 0) this.notifyIdle()
+            return
+          }
           if (this.queued.length > 0) {
             this.pump()
           } else if (this.running === 0) {
