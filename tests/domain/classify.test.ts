@@ -16,6 +16,7 @@ import {
   restoreFromTrash
 } from '../../electron/domain/classify'
 import { listFolders } from '../../electron/domain/folders'
+import { undoLastGroup } from '../../electron/domain/actions'
 
 const dirs: string[] = []
 const handles: Database[] = []
@@ -361,15 +362,48 @@ describe('classification actions', () => {
     ).toBe(true)
   })
 
-  it('deleteFolderWithPhotos on an empty folder soft-deletes it without writing any action rows', () => {
+  it('deleting an empty folder writes a NULL-photo marker and is fully undoable', () => {
     const db = tempDb()
     const batch = createBatch(db)
     const folder = createFolder(db, batch.id, 'empty')
+    const originalSortOrder = folder.sortOrder
 
     expect(deleteFolderWithPhotos(db, folder.id)).toBe(0)
 
     expect(listFolders(db, batch.id).map((f) => f.id)).not.toContain(folder.id)
-    expect(actionCount(db)).toBe(0)
+    // The marker row keeps the folder deletion itself undoable.
+    const markers = db
+      .prepare(
+        `SELECT * FROM actions
+         WHERE photo_id IS NULL AND from_status = 'folder' AND from_folder_id = ?
+           AND to_status = 'inbox' AND to_folder_id IS NULL AND undone = 0`
+      )
+      .all(folder.id)
+    expect(markers).toHaveLength(1)
+
+    expect(undoLastGroup(db, batch.id)).toBe(true)
+    const revived = listFolders(db, batch.id).find((f) => f.id === folder.id)!
+    expect(revived).toBeDefined()
+    expect(revived.name).toBe('empty')
+    expect(revived.sortOrder).toBe(originalSortOrder)
+    expect(undoLastGroup(db, batch.id)).toBe(false)
+  })
+
+  it('deleting a folder that only holds trashed photos writes a marker and undo leaves trash untouched', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, 'f')
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+    assignToFolder(db, [photoId], folder.id)
+    moveToTrash(db, [photoId])
+
+    expect(deleteFolderWithPhotos(db, folder.id)).toBe(0)
+    // Trash photos only retain the folder id; they are not moved by the folder deletion.
+    expect(photoState(db, photoId)).toEqual({ status: 'trash', folder_id: folder.id })
+
+    expect(undoLastGroup(db, batch.id)).toBe(true)
+    expect(listFolders(db, batch.id).map((f) => f.id)).toContain(folder.id)
+    expect(photoState(db, photoId)).toEqual({ status: 'trash', folder_id: folder.id })
   })
 
   it('deleteFolderWithPhotos throws FolderNotFoundError on unknown or already-deleted ids and rolls back', () => {

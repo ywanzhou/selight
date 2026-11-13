@@ -122,7 +122,8 @@ export function restoreFromTrash(db: Database, photoIds: number[]): number {
 
 // Ruling 12: one transaction soft-deletes the folder and returns every folder photo to inbox,
 // logging one action per photo under a single new group so one undo restores everything.
-// An empty folder is still soft-deleted and writes no action rows.
+// With zero folder-status photos (empty or trash-only folder) a NULL-photo marker row still
+// records the deletion, so undoing the group revives the folder.
 export function deleteFolderWithPhotos(db: Database, folderId: number): number {
   return db.transaction(() => {
     const folder = db
@@ -136,7 +137,6 @@ export function deleteFolderWithPhotos(db: Database, folderId: number): number {
     const photos = db
       .prepare("SELECT id FROM photos WHERE status = 'folder' AND folder_id = ?")
       .all(folderId) as { id: number }[]
-    if (photos.length === 0) return 0
 
     const groupId = nextGroupId(db, folder.batch_id)
     const updatePhoto = db.prepare(
@@ -147,6 +147,9 @@ export function deleteFolderWithPhotos(db: Database, folderId: number): number {
          (batch_id, batch_id_group, photo_id, from_status, from_folder_id, to_status, to_folder_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
+    if (photos.length === 0) {
+      insertAction.run(folder.batch_id, groupId, null, 'folder', folderId, 'inbox', null)
+    }
     for (const photo of photos) {
       updatePhoto.run('inbox', null, now, photo.id)
       insertAction.run(

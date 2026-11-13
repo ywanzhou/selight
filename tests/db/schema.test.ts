@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { Database } from 'better-sqlite3'
+import BetterSqlite3, { type Database } from 'better-sqlite3'
 import { openDatabase } from '../../electron/db/schema'
 
 const dirs: string[] = []
@@ -56,7 +56,7 @@ describe('openDatabase schema', () => {
     const { db } = open(file)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(String(db.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
-    expect(db.pragma('user_version', { simple: true })).toBe(1)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
   })
 
   it('defines UNIQUE(batch_id, abs_path) indexes on photos and sources', () => {
@@ -186,6 +186,74 @@ describe('openDatabase schema', () => {
     expect(second.recovered).toBe(false)
     const row = second.db.prepare('SELECT name FROM batches').get() as { name: string }
     expect(row.name).toBe('婚礼 A')
+  })
+
+  it('migrates a v1 database to v2: actions rebuilt with nullable photo_id, old rows kept', () => {
+    const file = path.join(tempDir(), 'selight.db')
+    // Hand-built v1 database: actions.photo_id is NOT NULL as shipped in schema v1.
+    const legacy = new BetterSqlite3(file)
+    legacy.exec(`
+      CREATE TABLE batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        created_at INTEGER NOT NULL, last_opened_at INTEGER);
+      CREATE TABLE sources (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL,
+        abs_path TEXT NOT NULL, imported_at INTEGER NOT NULL, last_scan_at INTEGER);
+      CREATE TABLE folders (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL,
+        name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, deleted_at INTEGER);
+      CREATE TABLE photos (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL,
+        source_id INTEGER NOT NULL, abs_path TEXT NOT NULL, filename TEXT NOT NULL,
+        ext TEXT NOT NULL, size_bytes INTEGER NOT NULL, mtime INTEGER NOT NULL,
+        width INTEGER, height INTEGER, orientation INTEGER NOT NULL DEFAULT 1,
+        thumb_path TEXT, preview_path TEXT, status TEXT NOT NULL, folder_id INTEGER,
+        missing INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL);
+      CREATE TABLE actions (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id INTEGER NOT NULL REFERENCES batches(id),
+        batch_id_group INTEGER NOT NULL,
+        photo_id INTEGER NOT NULL REFERENCES photos(id),
+        from_status TEXT,
+        from_folder_id INTEGER REFERENCES folders(id),
+        to_status TEXT NOT NULL,
+        to_folder_id INTEGER REFERENCES folders(id),
+        undone INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL);
+      PRAGMA user_version = 1;
+      INSERT INTO batches (id, name, created_at) VALUES (1, 'b', 1700000000000);
+      INSERT INTO photos (id, batch_id, source_id, abs_path, filename, ext,
+        size_bytes, mtime, status, created_at, updated_at)
+      VALUES (1, 1, 1, 'p/a.jpg', 'a.jpg', '.jpg', 1024, 1700000000000,
+        'inbox', 1700000000000, 1700000000000);
+      INSERT INTO actions (batch_id, batch_id_group, photo_id, from_status, to_status, created_at)
+      VALUES (1, 1, 1, 'inbox', 'folder', 1700000000000);
+    `)
+    legacy.close()
+
+    const { db, recovered } = open(file)
+    expect(recovered).toBe(false)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
+    expect(tableNames(db)).toContain('actions')
+
+    // Existing action rows survive with their data intact.
+    const oldRows = db
+      .prepare('SELECT photo_id, from_status, to_status, undone FROM actions')
+      .all()
+    expect(oldRows).toEqual([
+      { photo_id: 1, from_status: 'inbox', to_status: 'folder', undone: 0 }
+    ])
+    // v2 allows the NULL-photo marker row; v1's NOT NULL constraint would have rejected it.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO actions (batch_id, batch_id_group, photo_id, from_status, to_status)
+           VALUES (1, 2, NULL, 'folder', 'inbox')`
+        )
+        .run()
+    ).not.toThrow()
+    expect((db.prepare('SELECT COUNT(*) AS n FROM actions').get() as { n: number }).n).toBe(2)
+    // Non-actions data is untouched.
+    expect(
+      (db.prepare('SELECT COUNT(*) AS n FROM photos').get() as { n: number }).n
+    ).toBe(1)
   })
 
   it('recovers a corrupt database: backs it up as .corrupt-<ts> and rebuilds an empty one', () => {

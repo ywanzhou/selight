@@ -1,10 +1,25 @@
 import BetterSqlite3, { type Database } from 'better-sqlite3'
 import fs from 'node:fs'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 // Epoch milliseconds; parenthesized expression defaults need SQLite 3.31+ (bundled in better-sqlite3 13).
 const NOW_EPOCH_MS = `(CAST(strftime('%s','now') AS INTEGER) * 1000)`
+
+// v2: photo_id is nullable so folder deletions with no folder-status photos can log a
+// NULL-photo marker row that keeps the deletion itself undoable.
+const ACTIONS_DDL = `CREATE TABLE actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES batches(id),
+  batch_id_group INTEGER NOT NULL,
+  photo_id INTEGER REFERENCES photos(id),
+  from_status TEXT,
+  from_folder_id INTEGER REFERENCES folders(id),
+  to_status TEXT NOT NULL,
+  to_folder_id INTEGER REFERENCES folders(id),
+  undone INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS}
+);`
 
 const DDL = `
 CREATE TABLE batches (
@@ -56,18 +71,7 @@ CREATE TABLE photos (
 );
 CREATE UNIQUE INDEX idx_photos_batch_path ON photos(batch_id, abs_path);
 
-CREATE TABLE actions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  batch_id INTEGER NOT NULL REFERENCES batches(id),
-  batch_id_group INTEGER NOT NULL,
-  photo_id INTEGER NOT NULL REFERENCES photos(id),
-  from_status TEXT,
-  from_folder_id INTEGER REFERENCES folders(id),
-  to_status TEXT NOT NULL,
-  to_folder_id INTEGER REFERENCES folders(id),
-  undone INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS}
-);
+${ACTIONS_DDL}
 `
 
 export interface OpenDatabaseResult {
@@ -78,9 +82,25 @@ export interface OpenDatabaseResult {
 
 function migrate(db: Database): void {
   const current = Number(db.pragma('user_version', { simple: true }))
-  // Migration skeleton: v1 creates everything; later versions add steps here.
   if (current >= SCHEMA_VERSION) return
-  db.exec('BEGIN;\n' + DDL + '\nCOMMIT;')
+  if (current === 0) {
+    db.exec('BEGIN;\n' + DDL + '\nCOMMIT;')
+  } else if (current === 1) {
+    // v1→v2: app is unreleased; only actions is rebuilt to make photo_id nullable for
+    // folder-deletion marker rows. Existing rows all have non-null photo_id and are copied
+    // verbatim, while photos/folders data is untouched. actions has no indexes to rebuild.
+    db.exec(`BEGIN;
+      ${ACTIONS_DDL.replace('CREATE TABLE actions', 'CREATE TABLE actions_new')}
+      INSERT INTO actions_new
+        (id, batch_id, batch_id_group, photo_id, from_status, from_folder_id,
+         to_status, to_folder_id, undone, created_at)
+      SELECT id, batch_id, batch_id_group, photo_id, from_status, from_folder_id,
+             to_status, to_folder_id, undone, created_at
+      FROM actions;
+      DROP TABLE actions;
+      ALTER TABLE actions_new RENAME TO actions;
+      COMMIT;`)
+  }
   db.pragma(`user_version = ${SCHEMA_VERSION}`)
 }
 

@@ -2,7 +2,8 @@ import type { Database } from 'better-sqlite3'
 import type { PhotoStatus } from './photos'
 
 interface UndoActionRow {
-  photo_id: number
+  // NULL for folder-deletion marker rows: they drive folder revival but update no photo.
+  photo_id: number | null
   from_status: PhotoStatus
   from_folder_id: number | null
 }
@@ -86,6 +87,7 @@ export function undoLastGroup(db: Database, batchId: number): boolean {
       'UPDATE photos SET status = ?, folder_id = ?, updated_at = ? WHERE id = ?'
     )
     for (const row of rows) {
+      if (row.photo_id === null) continue
       restorePhoto.run(row.from_status, row.from_folder_id, now, row.photo_id)
     }
 

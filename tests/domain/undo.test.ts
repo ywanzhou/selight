@@ -214,6 +214,50 @@ describe('undo engine', () => {
     expect(counts(db, batch.id)).toEqual({ total: 1, inbox: 0, folder: 0, trash: 1 })
   })
 
+  it('picks "原名 (恢复 2)" when both the original name and "原名 (恢复 1)" are taken by live folders', () => {
+    const { db } = tempDb()
+    const batch = createBatch(db)
+    const oldFolder = createFolder(db, batch.id, 'A')
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+    assignToFolder(db, [photoId], oldFolder.id)
+    deleteFolderWithPhotos(db, oldFolder.id)
+    createFolder(db, batch.id, 'A')
+    createFolder(db, batch.id, 'A (恢复 1)')
+
+    expect(undoLastGroup(db, batch.id)).toBe(true)
+
+    const revivedOld = listFolders(db, batch.id).find((f) => f.id === oldFolder.id)!
+    expect(revivedOld.name).toBe('A (恢复 2)')
+    expect(listFolders(db, batch.id)).toHaveLength(3)
+    expect(photoState(db, photoId)).toEqual({
+      status: 'folder',
+      folder_id: oldFolder.id
+    })
+  })
+
+  it('keeps undo scoped per batch: undoing batch A never touches batch B', () => {
+    const { db } = tempDb()
+    const batchA = createBatch(db, 'a')
+    const batchB = createBatch(db, 'b')
+    const folderA = createFolder(db, batchA.id, 'fa')
+    const folderB = createFolder(db, batchB.id, 'fb')
+    const photoA = addPhoto(db, batchA.id, 'E:/a/1.jpg')
+    const photoB = addPhoto(db, batchB.id, 'E:/b/1.jpg')
+    assignToFolder(db, [photoA], folderA.id)
+    assignToFolder(db, [photoB], folderB.id)
+
+    expect(undoLastGroup(db, batchA.id)).toBe(true)
+    expect(photoState(db, photoA)).toEqual({ status: 'inbox', folder_id: null })
+    // Batch B is completely untouched: photo state and undone flags both.
+    expect(photoState(db, photoB)).toEqual({ status: 'folder', folder_id: folderB.id })
+    expect(undoneGroups(db, batchB.id)).toBe(0)
+
+    // A has nothing left to undo while B still does — proving the scoping.
+    expect(undoLastGroup(db, batchA.id)).toBe(false)
+    expect(undoLastGroup(db, batchB.id)).toBe(true)
+    expect(photoState(db, photoB)).toEqual({ status: 'inbox', folder_id: null })
+  })
+
   it('still undoes after closing and reopening the database through openDatabase', () => {
     const { db, file } = tempDb()
     const batch = createBatch(db)
