@@ -90,9 +90,8 @@ export default function ThumbPane() {
   )
 
   // HTML5 drag source. The payload is the whole current selection; dragging an
-  // unselected photo first collapses the selection to just that photo. The ref
-  // is dropped on dragend so a canceled drag leaves no stale payload behind.
-  const dragIdsRef = useRef<number[]>([])
+  // unselected photo first collapses the selection to just that photo. The
+  // DataTransfer owns the payload, so there is no dragend state to clean up.
   const handleDragStart = useCallback(
     (id: number, e: DragEvent<HTMLDivElement>) => {
       let ids = [...selected]
@@ -100,15 +99,11 @@ export default function ThumbPane() {
         toggle(id)
         ids = [id]
       }
-      dragIdsRef.current = ids
       e.dataTransfer.setData(DROP_MIME, JSON.stringify(ids))
       e.dataTransfer.effectAllowed = 'move'
     },
     [selected, toggle]
   )
-  const handleDragEnd = useCallback(() => {
-    dragIdsRef.current = []
-  }, [])
 
   const restoreSelection = useCallback(async () => {
     const ids = [...selected]
@@ -136,8 +131,7 @@ export default function ThumbPane() {
     anchorId: anchor,
     nonce,
     onToggle: toggle,
-    onDragStart: handleDragStart,
-    onDragEnd: handleDragEnd
+    onDragStart: handleDragStart
   }
 
   return (

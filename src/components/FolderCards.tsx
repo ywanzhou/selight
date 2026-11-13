@@ -42,11 +42,12 @@ function FolderContextMenu({
       onClose()
     }
     function onKeyDown(e: KeyboardEvent): void {
-      if (e.key !== 'Escape') return
-      // Capture phase runs before the bubble-phase global shortcut listener, so
-      // closing the menu does not also fire back-to-inbox behind it.
+      // Modal contract (same as RecoveryDialog): while the menu is open every
+      // key belongs to the menu. Capture-phase stopPropagation runs before the
+      // bubble-phase global shortcut listener, so Delete/digits/Ctrl+Z can
+      // never move photos behind the menu.
       e.stopPropagation()
-      onClose()
+      if (e.key === 'Escape') onClose()
     }
     window.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKeyDown, true)
@@ -102,7 +103,7 @@ export default function FolderCards() {
       return
     }
     let cancelled = false
-    void Promise.all(
+    void Promise.allSettled(
       folders.map(async (folder) => {
         const photos = await window.selight.listView(batchId, {
           kind: 'folder',
@@ -110,13 +111,16 @@ export default function FolderCards() {
         })
         return [folder.id, photos.length] as const
       })
-    )
-      .then((entries) => {
-        if (!cancelled) setFolderCounts(Object.fromEntries(entries))
-      })
-      .catch(() => {
-        if (!cancelled) setFolderCounts({})
-      })
+    ).then((results) => {
+      if (cancelled) return
+      const next: Record<number, number> = {}
+      for (const result of results) {
+        // A failed per-folder pull stays absent; FolderCard's ?? 0 shows 0 张
+        // for that one card instead of blanking the whole grid.
+        if (result.status === 'fulfilled') next[result.value[0]] = result.value[1]
+      }
+      setFolderCounts(next)
+    })
     return () => {
       cancelled = true
     }

@@ -13,9 +13,8 @@ export interface ThumbCellData {
   nonce: number
   onToggle: (id: number, options: ToggleOptions) => void
   // HTML5 drag source: dragstart writes the current selection (or just the
-  // dragged photo) under the shared drop mime; dragend releases the ref.
+  // dragged photo) under the shared drop mime.
   onDragStart: (id: number, e: DragEvent<HTMLDivElement>) => void
-  onDragEnd: () => void
 }
 
 interface GridCellProps extends ThumbCellData {
@@ -85,8 +84,7 @@ export default function GridCell({
   selected,
   anchorId,
   onToggle,
-  onDragStart,
-  onDragEnd
+  onDragStart
 }: GridCellProps) {
   const photo = photos[rowIndex * 2 + columnIndex]
   if (photo === undefined) return null
@@ -98,7 +96,6 @@ export default function GridCell({
       {...ariaAttributes}
       draggable
       onDragStart={(e) => onDragStart(photo.id, e)}
-      onDragEnd={onDragEnd}
       onClick={(e) =>
         onToggle(photo.id, {
           ctrl: e.ctrlKey || e.metaKey,
