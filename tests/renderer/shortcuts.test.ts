@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shortcutToAction } from '../../src/state/shortcuts'
+import { isInputTarget, shortcutToAction } from '../../src/state/shortcuts'
 
 // DOM-free table tests for the key → action mapper. The function never touches
 // the event itself: returning a non-null action is the contract the hook uses to
@@ -132,6 +132,43 @@ describe('shortcutToAction input guard', () => {
       expect(shortcutToAction(k(info), 9, true)).toBeNull()
     })
   }
+})
+
+describe('isInputTarget', () => {
+  for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT']) {
+    it(`treats a focused <${tagName}> as an input target`, () => {
+      expect(isInputTarget({ tagName })).toBe(true)
+    })
+  }
+
+  it('treats contentEditable elements as input targets', () => {
+    expect(isInputTarget({ tagName: 'DIV', contentEditable: true })).toBe(true)
+  })
+
+  it('treats ordinary elements and null as non-inputs', () => {
+    expect(isInputTarget({ tagName: 'BUTTON' })).toBe(false)
+    expect(isInputTarget({ tagName: 'DIV', contentEditable: false })).toBe(false)
+    expect(isInputTarget(null)).toBe(false)
+  })
+
+  // The toolbar batch <select> keeps focus after a mouse switch: every mapped
+  // key must surrender while it is focused.
+  it('suppresses every mapped key while a SELECT is focused', () => {
+    const inInput = isInputTarget({ tagName: 'SELECT' })
+    for (const info of [
+      { key: 'ArrowLeft' },
+      { key: 'ArrowRight' },
+      { key: '1' },
+      { key: '9' },
+      { key: 'Delete' },
+      { key: 'Backspace' },
+      { key: 'Escape' },
+      { key: 'z', ctrlKey: true },
+      { key: 'a', metaKey: true }
+    ]) {
+      expect(shortcutToAction(k(info), 9, inInput)).toBeNull()
+    }
+  })
 })
 
 describe('shortcutToAction unmapped keys', () => {

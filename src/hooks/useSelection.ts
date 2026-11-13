@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import {
+  useCallback,
+  useLayoutEffect,
+  useReducer,
+  useRef
+} from 'react'
 import {
   createSelection,
   neighborId,
@@ -44,10 +49,9 @@ export function useSelection(
   onChangeRef.current = onChange
   const pendingPinRef = useRef<number | null>(null)
 
-  // The render-phase recreation above clears selection; mirror that reset once
-  // committed so store consumers see the empty selection — unless a pin was
-  // requested (post-classify landing), in which case select the pinned photo.
-  useEffect(() => {
+  // Layout effect (not passive): the pin must land before paint so assign/trash
+  // refreshes never flash a one-frame empty selection. Same deps as before.
+  useLayoutEffect(() => {
     const pinned = pendingPinRef.current
     pendingPinRef.current = null
     if (pinned !== null && orderedIds.includes(pinned)) {

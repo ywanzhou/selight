@@ -17,6 +17,25 @@ export interface KeyInfo {
   metaKey: boolean
 }
 
+export interface InputTarget {
+  tagName: string
+  contentEditable?: boolean
+}
+
+// DOM-free so the focus contract runs under bare Node; the hook passes
+// document.activeElement's tagName/contentEditable in. SELECT is included:
+// the toolbar batch dropdown retains focus after a mouse switch and owns its
+// own arrow/Esc/digit/Backspace behavior.
+export function isInputTarget(target: InputTarget | null): boolean {
+  if (target === null) return false
+  return (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT' ||
+    target.contentEditable === true
+  )
+}
+
 export function shortcutToAction(
   e: KeyInfo,
   folderCount: number,

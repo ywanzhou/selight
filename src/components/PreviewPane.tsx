@@ -17,7 +17,11 @@ function StageImage({ photo }: { photo: PhotoRow }) {
   useEffect(() => setFailed(false), [photo.id])
 
   if (photo.missing === 1 || failed) {
-    return <p className="stage-msg">原文件缺失，暂时无法预览</p>
+    return (
+      <p className="stage-msg" role="status">
+        原文件缺失，暂时无法预览
+      </p>
+    )
   }
   if (src === undefined) return null
   return (
@@ -63,7 +67,9 @@ export default function PreviewPane() {
   return (
     <main className="preview-pane">
       {photo === undefined ? (
-        <p className="pane-empty">选择一张照片开始预览</p>
+        <p className="pane-empty" role="status">
+          选择一张照片开始预览
+        </p>
       ) : (
         <>
           <div className="preview-stage">

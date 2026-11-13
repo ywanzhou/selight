@@ -1,34 +1,28 @@
 import { useEffect, useRef } from 'react'
 import type { ShortcutAction } from '../state/shortcuts'
-import { shortcutToAction } from '../state/shortcuts'
+import { isInputTarget, shortcutToAction } from '../state/shortcuts'
 import { nextSelectionId } from '../state/selection'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
 
 type MappedAction = Exclude<ShortcutAction, null>
 
-function isInputTarget(el: Element | null): boolean {
-  if (!(el instanceof HTMLElement)) return false
-  return (
-    el.tagName === 'INPUT' ||
-    el.tagName === 'TEXTAREA' ||
-    el.isContentEditable
-  )
-}
-
 function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
 // One window-level keydown listener for the whole app. Refs keep the handler
-// closure current while the listener itself is registered once.
-export function useShortcuts(): void {
+// closure current while the listener itself is registered once. While a modal
+// is open the hook is disabled entirely so keys never reach the grid behind it.
+export function useShortcuts(disabled = false): void {
   const store = useAppStore()
   const selection = useSelectionContext()
   const storeRef = useRef(store)
   storeRef.current = store
   const selectionRef = useRef(selection)
   selectionRef.current = selection
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
 
   useEffect(() => {
     async function run(action: MappedAction): Promise<void> {
@@ -83,10 +77,16 @@ export function useShortcuts(): void {
     }
 
     function onKeyDown(e: KeyboardEvent): void {
+      if (disabledRef.current) return
+      const el = document.activeElement
       const action = shortcutToAction(
         e,
         storeRef.current.state.folders.length,
-        isInputTarget(document.activeElement)
+        isInputTarget(
+          el instanceof HTMLElement
+            ? { tagName: el.tagName, contentEditable: el.isContentEditable }
+            : null
+        )
       )
       if (action === null) return
       // Every mapped action owns its browser default (notably Backspace/Ctrl+A),

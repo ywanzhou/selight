@@ -55,26 +55,21 @@ function ErrorState() {
   )
 }
 
-function RecoveryDialog() {
+function RecoveryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { recoveryImport } = useAppStore()
-  const [open, setOpen] = useState(false)
   const reimportButtonRef = useRef<HTMLButtonElement>(null)
 
-  useEffect(
-    () => window.selight.onDbRecovered(() => setOpen(true)),
-    []
-  )
-
-  // Focus the default action on open; Esc dismisses, same as 以后再说.
+  // Focus the default action on open; Esc dismisses, same as 以后再说. The
+  // global shortcut hook is disabled while this modal is open.
   useEffect(() => {
     if (!open) return
     reimportButtonRef.current?.focus()
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open])
+  }, [open, onClose])
 
   if (!open) return null
   return (
@@ -90,7 +85,7 @@ function RecoveryDialog() {
         <h2 id="recovery-title">数据库已恢复</h2>
         <p id="recovery-desc">本地数据库损坏后已重建为空库，请重新导入照片文件夹。</p>
         <div className="modal-actions">
-          <button type="button" className="tb-btn" onClick={() => setOpen(false)}>
+          <button type="button" className="tb-btn" onClick={onClose}>
             以后再说
           </button>
           <button
@@ -98,7 +93,7 @@ function RecoveryDialog() {
             type="button"
             className="tb-btn tb-btn-primary"
             onClick={() => {
-              setOpen(false)
+              onClose()
               // recoveryImport creates a batch first when the rebuilt DB has none.
               recoveryImport().catch((e: unknown) =>
                 window.alert(e instanceof Error ? e.message : String(e))
@@ -114,9 +109,10 @@ function RecoveryDialog() {
 }
 
 // Mounted inside SelectionProvider: the global shortcut hook mutates the same
-// selection model the thumbnail grid and preview read.
-function Workspace() {
-  useShortcuts()
+// selection model the thumbnail grid and preview read. While the recovery modal
+// is open the hook is disabled so keys cannot act on the grid behind it.
+function Workspace({ modalOpen }: { modalOpen: boolean }) {
+  useShortcuts(modalOpen)
   return (
     <div className="app-body">
       <ThumbPane />
@@ -128,6 +124,12 @@ function Workspace() {
 
 function Shell() {
   const { state } = useAppStore()
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+
+  useEffect(
+    () => window.selight.onDbRecovered(() => setRecoveryOpen(true)),
+    []
+  )
 
   return (
     <div className="app-shell">
@@ -138,10 +140,10 @@ function Shell() {
         <EmptyState />
       ) : (
         <SelectionProvider>
-          <Workspace />
+          <Workspace modalOpen={recoveryOpen} />
         </SelectionProvider>
       )}
-      <RecoveryDialog />
+      <RecoveryDialog open={recoveryOpen} onClose={() => setRecoveryOpen(false)} />
     </div>
   )
 }
