@@ -53,5 +53,14 @@ export function useSelection(
     emit()
   }, [model, emit])
 
-  return { selected: model.selected, anchor: model.anchor, toggle, selectAll, clear }
+  return {
+    selected: model.selected,
+    anchor: model.anchor,
+    // Primitive read after every bump() re-render; cellProps consumers pass it
+    // through so react-window's shallow cellProps comparison always sees a change.
+    nonce: model.getNonce(),
+    toggle,
+    selectAll,
+    clear
+  }
 }

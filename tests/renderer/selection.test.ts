@@ -125,4 +125,59 @@ describe('createSelection', () => {
     expect(ids(next)).toEqual([])
     expect(next.anchor).toBeNull()
   })
+
+  it('cancels one id with ctrl after selectAll, without moving the anchor', () => {
+    const sel = createSelection(IDS)
+    sel.selectAll()
+    expect(sel.anchor).toBe(11)
+
+    sel.toggle(33, { ctrl: true })
+
+    expect(ids(sel).sort((a, b) => a - b)).toEqual(IDS.filter((id) => id !== 33))
+    expect(sel.anchor).toBe(11)
+  })
+
+  it('moves the shift range endpoint on consecutive shift clicks, keeping the anchor', () => {
+    const sel = createSelection(IDS)
+    sel.toggle(22)
+    sel.toggle(44, { shift: true })
+    expect(ids(sel)).toEqual([22, 33, 44])
+
+    sel.toggle(66, { shift: true })
+    expect(ids(sel)).toEqual([22, 33, 44, 55, 66])
+    expect(sel.anchor).toBe(22)
+  })
+})
+
+describe('createSelection nonce', () => {
+  it('starts at 0 for a new model', () => {
+    expect(createSelection(IDS).getNonce()).toBe(0)
+  })
+
+  it('increments strictly on every mutation', () => {
+    const sel = createSelection(IDS)
+    let expected = 0
+    const step = (fn: () => void) => {
+      fn()
+      expected += 1
+      expect(sel.getNonce()).toBe(expected)
+    }
+
+    step(() => sel.toggle(33))
+    step(() => sel.toggle(55, { ctrl: true }))
+    step(() => sel.toggle(33, { ctrl: true }))
+    step(() => sel.toggle(66, { shift: true }))
+    step(() => sel.selectAll())
+    step(() => sel.clear())
+  })
+
+  it('increments even when the operation changes nothing', () => {
+    const sel = createSelection(IDS)
+    sel.toggle(999)
+    expect(sel.getNonce()).toBe(1)
+
+    sel.selectAll()
+    sel.selectAll()
+    expect(sel.getNonce()).toBe(3)
+  })
 })

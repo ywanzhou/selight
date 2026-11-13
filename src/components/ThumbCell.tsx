@@ -32,6 +32,9 @@ export interface ThumbCellData {
   photos: PhotoRow[]
   selected: Set<number>
   anchorId: number | null
+  // Bumped on every selection mutation; breaks react-window's shallow cellProps
+  // memo even though the selected Set mutates in place.
+  nonce: number
   onToggle: (id: number, options: ToggleOptions) => void
 }
 
@@ -59,7 +62,11 @@ function ThumbCell({ photo, isAnchor, isSelected }: {
   return (
     <div className={classes} title={photo.filename}>
       {src !== undefined && (
+        // key=src: react-window recycles slots by index, so a new photo in this
+        // slot must remount the img — otherwise an inline error style from the
+        // previous photo would keep the good replacement hidden.
         <img
+          key={src}
           src={src}
           alt=""
           loading="lazy"

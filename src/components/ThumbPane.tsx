@@ -44,11 +44,18 @@ function emptyText(view: View): string {
 
 export default function ThumbPane() {
   const { state, setSelection } = useAppStore()
-  const { view, photos, folders } = state
+  const { batchId, view, photos, folders } = state
 
   const orderedIds = useMemo(() => photos.map((p) => p.id), [photos])
   const selection = useSelection(orderedIds, setSelection)
-  const { selected, anchor, toggle, selectAll } = selection
+  const { selected, anchor, nonce, toggle, selectAll } = selection
+
+  // Remount on batch/view switch: resets scroll position and prevents recycled
+  // slots from briefly showing the previous view's photos at the same indices.
+  const gridKey =
+    view.kind === 'folder'
+      ? `${batchId}:folder:${view.folderId}`
+      : `${batchId}:${view.kind}`
 
   // Best-effort thumbnail preheat: tell the main-process queue which rendered
   // ids matter now. Dedupe identical ranges so steady scrolling stays quiet.
@@ -93,9 +100,16 @@ export default function ThumbPane() {
       ? folders.find((f) => f.id === view.folderId)?.name
       : undefined
 
-  // Fresh object each render on purpose: selected/anchor mutate in place, so
-  // identity (not deep equality) is Grid's signal to re-render visible cells.
-  const cellProps: ThumbCellData = { photos, selected, anchorId: anchor, onToggle: toggle }
+  // Fresh object each render on purpose: the nonce primitive changes on every
+  // mutation, which is what breaks react-window's shallow Object.is cellProps
+  // memo — the selected Set itself keeps the same identity.
+  const cellProps: ThumbCellData = {
+    photos,
+    selected,
+    anchorId: anchor,
+    nonce,
+    onToggle: toggle
+  }
 
   return (
     <aside className="sidebar left frosted hairline-right">
@@ -117,6 +131,7 @@ export default function ThumbPane() {
       ) : (
         <div className="thumbs-wrap">
           <Grid<ThumbCellData>
+            key={gridKey}
             cellComponent={GridCell}
             cellProps={cellProps}
             columnCount={COLUMN_COUNT}
