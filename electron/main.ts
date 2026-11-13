@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
@@ -121,6 +121,16 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC_CHANNELS.classifyUndo, (_event, batchId: number) =>
     handlers.undo(batchId)
   )
+
+  // Native dialog stays in main: the sandboxed renderer has no Electron access, and
+  // createHandlers is Electron-free so its contract runs under bare Node.
+  ipcMain.handle(IPC_CHANNELS.dialogPickDirectory, async () => {
+    const options: OpenDialogOptions = { properties: ['openDirectory'] }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 
   mainWindow = createWindow()
   if (recovered) {

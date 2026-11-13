@@ -61,9 +61,13 @@ export interface SelightHandlers {
   undo(batchId: number): Promise<boolean>
 }
 
-// Full window.selight surface: the invoke handlers plus the main→renderer push
-// subscription, which only the preload (holding ipcRenderer) can implement.
+// Full window.selight surface: the invoke handlers plus the two renderer-only
+// capabilities that cannot live in the pure SelightHandlers factory (no Electron
+// import there, so its contract still runs under bare Node in Vitest).
 export interface SelightApi extends SelightHandlers {
+  // Native directory picker; null when the user cancels. Sandboxed renderers cannot
+  // call dialog themselves, so this is handled directly in main, outside createHandlers.
+  pickDirectory(): Promise<string | null>
   // Subscribe to the DB-corruption-recovery notice; calling the returned function
   // removes the listener.
   onDbRecovered(cb: () => void): () => void
@@ -87,6 +91,8 @@ export const IPC_CHANNELS = {
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',
   classifyUndo: 'selight:classify:undo',
+  // Main-only dialog invoke; deliberately absent from SelightHandlers/createHandlers.
+  dialogPickDirectory: 'selight:dialog:pick-directory',
   // Main → renderer notice only; no invoke handler is registered for this channel.
   dbRecovered: 'selight:db:recovered'
 } as const

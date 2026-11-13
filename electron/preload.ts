@@ -30,6 +30,9 @@ const api: SelightApi = {
   restore: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyRestore, photoIds),
   undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId),
 
+  // Renderer-only capability: native dialog handled in main, outside the pure factory.
+  pickDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.dialogPickDirectory),
+
   // Main→renderer push. The wrapped unsubscribe removes the exact listener instance.
   onDbRecovered: (cb) => {
     const listener = () => cb()
