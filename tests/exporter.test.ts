@@ -356,6 +356,54 @@ describe('exportBatch', () => {
     expect(fs.readdirSync(output)).toEqual([])
   })
 
+  it('routes a folder mkdir failure into failures without aborting the other folders', async () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    // '?' is legal inside SQLite but an NTFS-illegal path character; createFolder
+    // only checks duplicate names, so this row is reachable. The mkdir spy makes
+    // the failure deterministic on every platform (Linux would accept the name).
+    const broken = createFolder(db, batch.id, 'broken?name')
+    const pick = createFolder(db, batch.id, '精选')
+    const fixture = makeFixtureTree()
+    await importFixture(db, batch.id, fixture.root)
+    const inbox = listPhotos(db, batch.id, { kind: 'inbox' })
+    const victim = inbox.find((p) => p.absPath === path.join(fixture.root, 'a.jpg'))!
+    const survivor = inbox.find((p) => p.filename === 'b.png')!
+    assignToFolder(db, [victim.id], broken.id)
+    assignToFolder(db, [survivor.id], pick.id)
+    const output = tempDir('selight-export-out-')
+    const progress: Array<[number, number]> = []
+
+    const realMkdir = fs.promises.mkdir.bind(fs.promises)
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir')
+    mkdirSpy.mockImplementation((target, options) => {
+      if (String(target).includes('broken?name')) {
+        const err = new Error('EINVAL: illegal characters') as Error & { code: string }
+        err.code = 'EINVAL'
+        return Promise.reject(err)
+      }
+      return realMkdir(target, options)
+    })
+    try {
+      // Must resolve, never reject: one group's mkdir failure cannot abort the batch.
+      const result = await exportBatch(db, batch.id, output, (done, total) =>
+        progress.push([done, total])
+      )
+
+      expect(result.copied).toBe(1)
+      expect(result.failures).toHaveLength(1)
+      expect(result.failures[0]).toContain(victim.absPath)
+      expect(result.failures[0]).toContain('创建失败')
+      // The healthy folder in the same batch still exported.
+      expect(fs.readFileSync(path.join(output, '精选', 'b.png'), 'utf8')).toBe('png-b')
+      expect(fs.existsSync(path.join(output, 'broken?name'))).toBe(false)
+      // Every photo, including the skipped group, settles progress at done === total.
+      expect(progress.at(-1)).toEqual([2, 2])
+    } finally {
+      mkdirSpy.mockRestore()
+    }
+  })
+
   it('uses COPYFILE_EXCL and retries with a suffix when another writer wins the destination first', async () => {
     const db = tempDb()
     const batch = createBatch(db)

@@ -86,20 +86,33 @@ export async function exportBatch(
   let copied = 0
   let done = 0
 
+  // Whole-group skip: every photo gets the same absPath + reason shape (used for
+  // both containment rejection and mkdir failure) and progress still advances, so
+  // no group-level problem can ever abort the batch.
+  const skipGroup = (group: WorkGroup, reason: string): void => {
+    for (const photo of group.photos) {
+      failures.push(`${photo.absPath}（${reason}：${group.folderName}）`)
+      done += 1
+      onProgress(done, total)
+    }
+  }
+
   for (const group of groups) {
-    // Containment failure is a whole-group skip: no mkdir, no copy. Each photo is
-    // recorded with the reason so the dialog can explain what was not exported.
+    // Containment failure is a whole-group skip: no mkdir, no copy.
     if (!group.safe) {
-      for (const photo of group.photos) {
-        failures.push(`${photo.absPath}（文件夹名越界，已跳过：${group.folderName}）`)
-        done += 1
-        onProgress(done, total)
-      }
+      skipGroup(group, '文件夹名越界，已跳过')
       continue
     }
 
     const subdir = path.join(outputRoot, group.folderName)
-    await fs.promises.mkdir(subdir, { recursive: true })
+    // mkdir stays inside the group guard: an illegal-character name or a permissions
+    // error fails this one group into the list instead of rejecting the whole run.
+    try {
+      await fs.promises.mkdir(subdir, { recursive: true })
+    } catch {
+      skipGroup(group, '文件夹创建失败，已跳过')
+      continue
+    }
 
     for (const photo of group.photos) {
       try {
