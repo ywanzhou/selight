@@ -1,11 +1,11 @@
 import { useAppStore } from '../state/store'
-import { ImportIcon, PlusIcon } from './icons'
+import { ExportIcon, ImportIcon, PlusIcon } from './icons'
 
 function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
-export default function Toolbar() {
+export default function Toolbar({ onExport }: { onExport: () => void }) {
   const { state, openBatch, createBatch, importDirectory } = useAppStore()
   const { batches, batchId, counts, loading } = state
 
@@ -64,7 +64,13 @@ export default function Toolbar() {
         导入文件夹
       </button>
 
-      <button type="button" className="tb-btn" disabled title="即将推出">
+      <button
+        type="button"
+        className="tb-btn"
+        disabled={batchId === null || loading}
+        onClick={onExport}
+      >
+        <ExportIcon />
         导出
       </button>
 

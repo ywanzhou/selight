@@ -9,6 +9,7 @@ import type {
 import {
   boot,
   createBatch,
+  exportBatch,
   importDirectory,
   openBatch,
   recoveryImport,
@@ -39,7 +40,10 @@ const HANDLER_NAMES = [
   'trash',
   'restore',
   'undo',
+  'exportBatch',
   'pickDirectory',
+  'pickExportDirectory',
+  'openPath',
   'getSession',
   'saveSession'
 ] as const
@@ -50,6 +54,7 @@ function makeApi(overrides: Partial<Record<keyof SelightApi, unknown>> = {}): Se
     ReturnType<typeof vi.fn>
   >
   base.onDbRecovered = vi.fn(() => () => {})
+  base.onExportProgress = vi.fn(() => () => {})
   return { ...base, ...overrides } as unknown as SelightApi
 }
 
@@ -454,6 +459,26 @@ describe('interactive thunks', () => {
 
     expect(await importDirectory(h.deps)).toBeNull()
     expect(importCall).not.toHaveBeenCalled()
+  })
+
+  it('exportBatch is a no-op without an open batch', async () => {
+    const exportCall = vi.fn()
+    const api = makeApi({ exportBatch: exportCall })
+    const h = harness(api)
+
+    expect(await exportBatch(h.deps, 'E:/out')).toBeNull()
+    expect(exportCall).not.toHaveBeenCalled()
+  })
+
+  it('exportBatch delegates to the bridge with the open batchId and chosen directory', async () => {
+    const result = { copied: 3, failures: [] }
+    const exportCall = vi.fn(async () => result)
+    const api = makeApi({ exportBatch: exportCall })
+    const h = harness(api)
+    h.dispatch({ type: 'opened', state: opened })
+
+    expect(await exportBatch(h.deps, 'E:/out')).toBe(result)
+    expect(exportCall).toHaveBeenCalledWith(1, 'E:/out')
   })
 
   it('refresh re-pulls the current view, counts and folders in parallel', async () => {

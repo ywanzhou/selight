@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
@@ -19,6 +19,9 @@ let db: Database | null = null
 let thumbQueue: MediaQueue | null = null
 let sessionStore: SessionStore | null = null
 let isQuitting = false
+// Last directory chosen for export. openPath only opens paths inside this root, so a
+// compromised/confused renderer cannot launch arbitrary paths in Explorer/Finder.
+let lastExportDir: string | null = null
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -66,7 +69,15 @@ app.whenReady().then(() => {
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(db, roots, exifReader)
   sessionStore = createFileSessionStore(path.join(userData, 'session.json'))
-  const handlers = createHandlers({ db, thumbQueue, exifReader, sessionStore })
+  const handlers = createHandlers({
+    db,
+    thumbQueue,
+    exifReader,
+    sessionStore,
+    onExportProgress: (done, total) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.exportProgress, { done, total })
+    }
+  })
 
   ipcMain.handle(IPC_CHANNELS.batchList, () => handlers.listBatches())
   ipcMain.handle(IPC_CHANNELS.batchCreate, (_event, name?: string) =>
@@ -126,6 +137,16 @@ app.whenReady().then(() => {
     handlers.undo(batchId)
   )
 
+  // Remember the resolved root here too, so openPath stays scoped even if a future
+  // caller starts an export without going through the picker.
+  ipcMain.handle(
+    IPC_CHANNELS.exportBatch,
+    async (_event, batchId: number, outputDir: string) => {
+      lastExportDir = path.resolve(outputDir)
+      return handlers.exportBatch(batchId, outputDir)
+    }
+  )
+
   ipcMain.handle(IPC_CHANNELS.sessionGet, () => handlers.getSession())
   ipcMain.handle(IPC_CHANNELS.sessionSave, (_event, state: SessionState) =>
     handlers.saveSession(state)
@@ -139,6 +160,35 @@ app.whenReady().then(() => {
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.dialogPickExportDirectory, async () => {
+    const options: OpenDialogOptions = {
+      title: '选择导出目录',
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return null
+    const picked = result.filePaths[0] ?? null
+    if (picked !== null) lastExportDir = path.resolve(picked)
+    return picked
+  })
+
+  // Containment check: rel === '' is the root itself (打开输出目录); anything containing
+  // '..' or resolving to another drive escapes the chosen export directory and is refused.
+  ipcMain.handle(IPC_CHANNELS.shellOpenPath, async (_event, target: string) => {
+    if (lastExportDir === null) {
+      throw new Error('尚未选择导出目录，无法打开路径')
+    }
+    const resolved = path.resolve(target)
+    const rel = path.relative(lastExportDir, resolved)
+    if (rel !== '' && (rel.startsWith('..') || path.isAbsolute(rel))) {
+      throw new Error(`拒绝打开导出目录之外的路径：${target}`)
+    }
+    const error = await shell.openPath(resolved)
+    if (error) throw new Error(error)
   })
 
   mainWindow = createWindow()

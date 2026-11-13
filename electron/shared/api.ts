@@ -6,8 +6,9 @@ import type { BatchRow } from '../domain/batches'
 import type { FolderRow } from '../domain/folders'
 import type { PhotoRow, View } from '../domain/photos'
 import type { SessionState } from '../session'
+import type { ExportResult } from '../exporter'
 
-export type { BatchRow, FolderRow, PhotoRow, View, SessionState }
+export type { BatchRow, FolderRow, PhotoRow, View, SessionState, ExportResult }
 
 export type MediaKind = 'thumb' | 'photo'
 
@@ -35,11 +36,18 @@ export interface ImportResult {
   failures: string[]
 }
 
+// Main → renderer progress payload for a running export; the channel carries this
+// object verbatim and preload re-exposes it through onExportProgress.
+export interface ExportProgressEvent {
+  done: number
+  total: number
+}
+
 // Request/response surface, wrapped 1:1 by ipcRenderer.invoke and implemented by the
-// pure createHandlers factory (which has no webContents and therefore cannot push).
-// Batch-scoped calls take batchId explicitly: the factory holds no mutable "current
-// batch", keeping it pure and per-batch isolation testable. exportBatch is deliberately
-// absent — Task 17 adds the exporter, its handler and progress event.
+// pure createHandlers factory (which has no webContents and therefore cannot push;
+// export progress leaves the factory through an injected callback). Batch-scoped calls
+// take batchId explicitly: the factory holds no mutable "current batch", keeping it
+// pure and per-batch isolation testable.
 export interface SelightHandlers {
   listBatches(): Promise<BatchRow[]>
   createBatch(name?: string): Promise<BatchRow>
@@ -61,6 +69,10 @@ export interface SelightHandlers {
   restore(photoIds: number[]): Promise<number>
   undo(batchId: number): Promise<boolean>
 
+  // Copies original folder-photo files into outputDir, one same-named subdir per
+  // non-empty live folder. Progress is pushed via the injected onExportProgress seam.
+  exportBatch(batchId: number, outputDir: string): Promise<ExportResult>
+
   // Session restore; the file storage is injected into createHandlers, so the
   // factory stays electron-free and the contract runs under bare Node.
   getSession(): Promise<SessionState | null>
@@ -74,9 +86,15 @@ export interface SelightApi extends SelightHandlers {
   // Native directory picker; null when the user cancels. Sandboxed renderers cannot
   // call dialog themselves, so this is handled directly in main, outside createHandlers.
   pickDirectory(): Promise<string | null>
+  // Picker for the export output directory; also arms the main-side openPath guard.
+  pickExportDirectory(): Promise<string | null>
+  // Open a path in Explorer/Finder. Main rejects anything outside the chosen export dir.
+  openPath(path: string): Promise<void>
   // Subscribe to the DB-corruption-recovery notice; calling the returned function
   // removes the listener.
   onDbRecovered(cb: () => void): () => void
+  // Subscribe to export progress while an exportBatch invoke is in flight.
+  onExportProgress(cb: (event: ExportProgressEvent) => void): () => void
 }
 
 // Channel names shared by preload (invoke/on) and main (handle/send), so they cannot drift.
@@ -101,6 +119,11 @@ export const IPC_CHANNELS = {
   sessionSave: 'selight:session:save',
   // Main-only dialog invoke; deliberately absent from SelightHandlers/createHandlers.
   dialogPickDirectory: 'selight:dialog:pick-directory',
+  dialogPickExportDirectory: 'selight:dialog:pick-export-directory',
+  shellOpenPath: 'selight:shell:open-path',
+  exportBatch: 'selight:export:batch',
+  // Main → renderer progress events; no invoke handler is registered for this channel.
+  exportProgress: 'selight:export:progress',
   // Main → renderer notice only; no invoke handler is registered for this channel.
   dbRecovered: 'selight:db:recovered'
 } as const

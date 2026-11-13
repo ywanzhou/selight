@@ -3,10 +3,18 @@ import Toolbar from './components/Toolbar'
 import ThumbPane from './components/ThumbPane'
 import PreviewPane from './components/PreviewPane'
 import FolderCards from './components/FolderCards'
+import ExportDialog from './components/ExportDialog'
 import { FolderIcon, PlusIcon } from './components/icons'
 import { useShortcuts } from './hooks/useShortcuts'
 import { AppStoreProvider, useAppStore } from './state/store'
 import { SelectionProvider } from './state/selectionContext'
+import type { ExportResult } from '../electron/shared/api'
+
+// Null = dialog closed; result === null within the object means the copy is still running.
+interface ExportRun {
+  outputDir: string
+  result: ExportResult | null
+}
 
 function EmptyState() {
   const { createBatch } = useAppStore()
@@ -113,27 +121,49 @@ function Workspace({ modalOpen }: { modalOpen: boolean }) {
 }
 
 function Shell() {
-  const { state } = useAppStore()
+  const { state, exportBatch } = useAppStore()
   const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [exportRun, setExportRun] = useState<ExportRun | null>(null)
 
   useEffect(
     () => window.selight.onDbRecovered(() => setRecoveryOpen(true)),
     []
   )
 
+  async function handleExport(): Promise<void> {
+    if (exportRun !== null) return
+    const outputDir = await window.selight.pickExportDirectory()
+    if (!outputDir) return
+    setExportRun({ outputDir, result: null })
+    try {
+      const result = await exportBatch(outputDir)
+      // A batch switch mid-run resolves to null: just close instead of sticking the dialog.
+      setExportRun(result === null ? null : { outputDir, result })
+    } catch (e) {
+      setExportRun(null)
+      window.alert(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   return (
     <div className="app-shell">
-      <Toolbar />
+      <Toolbar onExport={() => void handleExport()} />
       {state.error !== null ? (
         <ErrorState />
       ) : !state.loading && state.batchId === null ? (
         <EmptyState />
       ) : (
         <SelectionProvider>
-          <Workspace modalOpen={recoveryOpen} />
+          <Workspace modalOpen={recoveryOpen || exportRun !== null} />
         </SelectionProvider>
       )}
       <RecoveryDialog open={recoveryOpen} onClose={() => setRecoveryOpen(false)} />
+      <ExportDialog
+        open={exportRun !== null}
+        outputDir={exportRun?.outputDir ?? null}
+        result={exportRun?.result ?? null}
+        onClose={() => setExportRun(null)}
+      />
     </div>
   )
 }

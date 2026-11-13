@@ -11,6 +11,7 @@ import type {
   BatchRow,
   BatchState,
   Counts,
+  ExportResult,
   FolderRow,
   ImportResult,
   PhotoRow,
@@ -165,6 +166,20 @@ export async function recoveryImport(deps: ThunkDeps): Promise<ImportResult | nu
   return importDirectory(deps)
 }
 
+/**
+ * Export the open batch into an already-picked outputDir. The picker stays in the
+ * component (the dialog needs the path for 打开输出目录); progress arrives through
+ * the onExportProgress push, not the invoke result.
+ */
+export async function exportBatch(
+  deps: ThunkDeps,
+  outputDir: string
+): Promise<ExportResult | null> {
+  const { batchId } = deps.getState()
+  if (batchId === null) return null
+  return deps.api.exportBatch(batchId, outputDir)
+}
+
 /** First-paint chain; owns its try/catch so a reject becomes the error state. */
 export async function boot(deps: ThunkDeps): Promise<void> {
   deps.dispatch({ type: 'loading', loading: true })
@@ -228,6 +243,7 @@ export interface AppStore {
   createBatch(): Promise<void>
   importDirectory(): Promise<ImportResult | null>
   recoveryImport(): Promise<ImportResult | null>
+  exportBatch(outputDir: string): Promise<ExportResult | null>
 }
 
 const StoreContext = createContext<AppStore | null>(null)
@@ -277,7 +293,8 @@ export function AppStoreProvider({
     openBatch: (batchId) => openBatch(deps, batchId),
     createBatch: () => createBatch(deps),
     importDirectory: () => importDirectory(deps),
-    recoveryImport: () => recoveryImport(deps)
+    recoveryImport: () => recoveryImport(deps),
+    exportBatch: (outputDir) => exportBatch(deps, outputDir)
   }
   return createElement(StoreContext.Provider, { value: store }, children)
 }

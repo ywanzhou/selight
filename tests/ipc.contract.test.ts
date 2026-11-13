@@ -24,6 +24,7 @@ interface Setup {
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
   sessionStore: SessionStore
+  progressCalls: Array<[number, number]>
 }
 
 function setup(): Setup {
@@ -48,8 +49,15 @@ function setup(): Setup {
     flush: vi.fn()
   }
 
-  const deps: HandlerDeps = { db, thumbQueue, exifReader: fakeReader, sessionStore }
-  return { handlers: createHandlers(deps), db, queueCalls, sessionStore }
+  const progressCalls: Array<[number, number]> = []
+  const deps: HandlerDeps = {
+    db,
+    thumbQueue,
+    exifReader: fakeReader,
+    sessionStore,
+    onExportProgress: (done, total) => progressCalls.push([done, total])
+  }
+  return { handlers: createHandlers(deps), db, queueCalls, sessionStore, progressCalls }
 }
 
 afterEach(() => {
@@ -303,6 +311,65 @@ describe('IPC handler contract — full curation chain', () => {
   })
 })
 
+describe('IPC handler contract — export', () => {
+  it('exports folder photos through the handler with progress and excludes trash/empty folders', async () => {
+    const { handlers, progressCalls } = setup()
+    const batch = await handlers.createBatch()
+    const pick = await handlers.createFolder(batch.id, '精选')
+    const travel = await handlers.createFolder(batch.id, '旅行')
+    await handlers.createFolder(batch.id, '空文件夹')
+    const root = makeFixtureTree()
+    await handlers.importDirectory(batch.id, root)
+    const inbox = await handlers.listView(batch.id, { kind: 'inbox' })
+    const byPath = new Map(inbox.map((p) => [p.absPath, p.id]))
+    const a = byPath.get(path.join(root, 'a.jpg'))!
+    const b = byPath.get(path.join(root, 'b.png'))!
+    const c = byPath.get(path.join(root, 'sub', 'c.webp'))!
+    const d = byPath.get(path.join(root, 'sub', 'nested', 'd.arw'))!
+
+    await handlers.assign([a, b], pick.id)
+    await handlers.assign([c, d], travel.id)
+    await handlers.trash([d])
+
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-ipc-export-'))
+    dirs.push(output)
+    const result = await handlers.exportBatch(batch.id, output)
+
+    expect(result).toEqual({ copied: 3, failures: [] })
+    expect(fs.readdirSync(output, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()).toEqual(['旅行', '精选'])
+    expect(fs.readdirSync(path.join(output, '精选')).sort()).toEqual(['a.jpg', 'b.png'])
+    expect(fs.readdirSync(path.join(output, '旅行'))).toEqual(['c.webp'])
+    expect(walkFiles(output).map((f) => path.basename(f))).not.toContain('d.arw')
+
+    // The injected seam receives one call per settled file, ending at done === total.
+    expect(progressCalls).toHaveLength(3)
+    expect(progressCalls.at(-1)).toEqual([3, 3])
+  })
+
+  it('returns missing-source paths in failures without abort the run', async () => {
+    const { handlers } = setup()
+    const batch = await handlers.createBatch()
+    const folder = await handlers.createFolder(batch.id, '精选')
+    const root = makeFixtureTree()
+    await handlers.importDirectory(batch.id, root)
+    const inbox = await handlers.listView(batch.id, { kind: 'inbox' })
+    await handlers.assign(
+      inbox.map((p) => p.id),
+      folder.id
+    )
+    const victim = inbox.find((p) => p.filename === 'b.png')!
+    fs.rmSync(victim.absPath)
+
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-ipc-export-'))
+    dirs.push(output)
+    const result = await handlers.exportBatch(batch.id, output)
+
+    expect(result.copied).toBe(3)
+    expect(result.failures).toEqual([victim.absPath])
+    expect(fs.readdirSync(path.join(output, '精选'))).not.toContain('b.png')
+  })
+})
+
 // The preload cannot run under bare Node, so the push-event path is split: the channel
 // constant and the API type shape are pinned here, while the real ipcRenderer.on delivery
 // across the contextBridge (sandbox:true) is proven by the throwaway Electron dev harness.
@@ -319,5 +386,27 @@ describe('window.selight db-recovery push surface', () => {
       return () => {}
     }
     expect(typeof probe).toBe('function')
+  })
+
+  it('pins the export channels, dialog/shell seams and progress subscription shape', () => {
+    expect(IPC_CHANNELS.exportBatch).toBe('selight:export:batch')
+    expect(IPC_CHANNELS.exportProgress).toBe('selight:export:progress')
+    expect(IPC_CHANNELS.dialogPickExportDirectory).toBe(
+      'selight:dialog:pick-export-directory'
+    )
+    expect(IPC_CHANNELS.shellOpenPath).toBe('selight:shell:open-path')
+
+    // Structural probes, enforced by tsc against the SelightApi bridge contract.
+    const picker: SelightApi['pickExportDirectory'] = async () => null
+    const opener: SelightApi['openPath'] = async () => undefined
+    const subscribe: SelightApi['onExportProgress'] = (cb) => {
+      cb({ done: 1, total: 2 })
+      return () => {}
+    }
+    expect([typeof picker, typeof opener, typeof subscribe]).toEqual([
+      'function',
+      'function',
+      'function'
+    ])
   })
 })

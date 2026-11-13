@@ -10,6 +10,7 @@ import {
 } from './domain/classify'
 import { undoLastGroup } from './domain/actions'
 import { importScanned, scanDirectory, type ExifReader } from './scanner'
+import { exportBatch as runExport } from './exporter'
 import type { MediaQueue } from './media/queue'
 import type { SessionStore } from './session'
 import type {
@@ -28,6 +29,9 @@ export interface HandlerDeps {
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   exifReader: ExifReader
   sessionStore: Pick<SessionStore, 'read' | 'write'>
+  // Renderer push has no place in the pure factory: main.ts injects webContents.send,
+  // contract tests inject a recording stub.
+  onExportProgress: (done: number, total: number) => void
 }
 
 // 500 bound variables per statement, matching the scanner/photos chunking and staying
@@ -72,7 +76,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, exifReader, sessionStore } = deps
+  const { db, thumbQueue, exifReader, sessionStore, onExportProgress } = deps
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -157,6 +161,11 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
 
     async undo(batchId) {
       return undoLastGroup(db, batchId)
+    },
+
+    // ---- export -----------------------------------------------------------
+    async exportBatch(batchId, outputDir) {
+      return runExport(db, batchId, outputDir, onExportProgress)
     },
 
     // ---- session ----------------------------------------------------------

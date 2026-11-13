@@ -29,6 +29,15 @@ export function ImportIcon(props: IconProps) {
   )
 }
 
+export function ExportIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 13V4m0 0L8.5 7.5M12 4l3.5 3.5" />
+      <rect x="4" y="13" width="16" height="7" rx="2" />
+    </Svg>
+  )
+}
+
 export function GridIcon(props: IconProps) {
   return (
     <Svg strokeWidth={1.7} {...props}>
