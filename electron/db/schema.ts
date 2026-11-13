@@ -3,20 +3,23 @@ import fs from 'node:fs'
 
 export const SCHEMA_VERSION = 1
 
+// Epoch milliseconds; parenthesized expression defaults need SQLite 3.31+ (bundled in better-sqlite3 13).
+const NOW_EPOCH_MS = `(CAST(strftime('%s','now') AS INTEGER) * 1000)`
+
 const DDL = `
 CREATE TABLE batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_opened_at TEXT
+  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS},
+  last_opened_at INTEGER
 );
 
 CREATE TABLE sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id INTEGER NOT NULL REFERENCES batches(id),
   abs_path TEXT NOT NULL,
-  imported_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_scan_at TEXT
+  imported_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS},
+  last_scan_at INTEGER
 );
 CREATE UNIQUE INDEX idx_sources_batch_path ON sources(batch_id, abs_path);
 
@@ -25,8 +28,8 @@ CREATE TABLE folders (
   batch_id INTEGER NOT NULL REFERENCES batches(id),
   name TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  deleted_at TEXT
+  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS},
+  deleted_at INTEGER
 );
 CREATE UNIQUE INDEX idx_folders_batch_name
   ON folders(batch_id, name) WHERE deleted_at IS NULL;
@@ -48,8 +51,8 @@ CREATE TABLE photos (
   status TEXT NOT NULL,
   folder_id INTEGER REFERENCES folders(id),
   missing INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS},
+  updated_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS}
 );
 CREATE UNIQUE INDEX idx_photos_batch_path ON photos(batch_id, abs_path);
 
@@ -63,7 +66,7 @@ CREATE TABLE actions (
   to_status TEXT NOT NULL,
   to_folder_id INTEGER REFERENCES folders(id),
   undone INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at INTEGER NOT NULL DEFAULT ${NOW_EPOCH_MS}
 );
 `
 

@@ -90,7 +90,7 @@ describe('openDatabase schema', () => {
         '合影'
       )
     ).toThrow()
-    db.prepare('UPDATE folders SET deleted_at = ? WHERE id = 1').run('2026-11-13T00:00:00Z')
+    db.prepare('UPDATE folders SET deleted_at = ? WHERE id = 1').run(1700000000000)
     db.prepare('INSERT INTO folders (id, batch_id, name, sort_order) VALUES (3, 1, ?, 2)').run(
       '合影'
     )
@@ -106,6 +106,65 @@ describe('openDatabase schema', () => {
     expect(String(column('photos', 'orientation').dflt_value)).toBe('1')
     expect(String(column('photos', 'missing').dflt_value)).toBe('0')
     expect(String(column('actions', 'undone').dflt_value)).toBe('0')
+  })
+
+  it('stores all timestamps as INTEGER epoch millis, including expression defaults', () => {
+    const file = path.join(tempDir(), 'selight.db')
+    const { db } = open(file)
+    const timestampColumns: Array<[string, string, boolean]> = [
+      ['batches', 'created_at', true],
+      ['batches', 'last_opened_at', false],
+      ['sources', 'imported_at', true],
+      ['sources', 'last_scan_at', false],
+      ['folders', 'created_at', true],
+      ['folders', 'deleted_at', false],
+      ['photos', 'created_at', true],
+      ['photos', 'updated_at', true],
+      ['photos', 'mtime', false],
+      ['actions', 'created_at', true]
+    ]
+    for (const [table, name, hasDefault] of timestampColumns) {
+      const info = (
+        db.pragma(`table_info(${table})`) as Array<{
+          name: string
+          type: string
+          dflt_value: string | null
+        }>
+      ).find((c) => c.name === name)!
+      expect(info.type.toUpperCase()).toBe('INTEGER')
+      if (hasDefault) expect(info.dflt_value).toContain("strftime('%s','now')")
+    }
+
+    const before = Date.now()
+    db.prepare('INSERT INTO batches (id, name) VALUES (1, ?)').run('b1')
+    db.prepare('INSERT INTO sources (id, batch_id, abs_path) VALUES (1, 1, ?)').run('s')
+    db.prepare(
+      `INSERT INTO photos (id, batch_id, source_id, abs_path, filename, ext,
+        size_bytes, mtime, status) VALUES (1, 1, 1, ?, ?, ?, ?, ?, 'inbox')`
+    ).run('p/a.jpg', 'a.jpg', '.jpg', 1024, 1700000000000)
+    db.prepare(
+      `INSERT INTO actions (id, batch_id, batch_id_group, photo_id, to_status)
+       VALUES (1, 1, 1, 1, 'trash')`
+    ).run()
+    const after = Date.now()
+
+    const batch = db.prepare('SELECT created_at FROM batches').get() as { created_at: number }
+    expect(Number.isInteger(batch.created_at)).toBe(true)
+    expect(batch.created_at).toBeGreaterThan(1e12)
+    // The expression default truncates to whole seconds, so allow a one-second window.
+    expect(batch.created_at).toBeGreaterThanOrEqual(before - 1000)
+    expect(batch.created_at).toBeLessThanOrEqual(after + 1000)
+
+    const photo = db.prepare('SELECT mtime, created_at, updated_at FROM photos').get() as Record<
+      string,
+      number
+    >
+    for (const value of Object.values(photo)) {
+      expect(Number.isInteger(value)).toBe(true)
+      expect(value).toBeGreaterThan(1e12)
+    }
+    const action = db.prepare('SELECT created_at FROM actions').get() as { created_at: number }
+    expect(Number.isInteger(action.created_at)).toBe(true)
   })
 
   it('enforces foreign keys', () => {
