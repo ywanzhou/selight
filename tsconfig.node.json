@@ -19,6 +19,7 @@
     "vitest.config.ts",
     "electron/main.ts",
     "electron/preload.ts",
+    "electron/db/**/*.ts",
     "tests/**/*.ts"
   ]
 }
