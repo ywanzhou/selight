@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -105,6 +105,21 @@ function snapshotTree(root: string): Map<string, string> {
     snap.set(path.relative(root, f), fs.readFileSync(f, 'utf8'))
   }
   return snap
+}
+
+// Every entry (files and directories) relative to root, so an out-of-tree mkdir is
+// caught even when the photo copy inside it later fails.
+function walkEntries(root: string): string[] {
+  const out: string[] = []
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    out.push(entry.name)
+    if (entry.isDirectory()) {
+      for (const nested of walkEntries(path.join(root, entry.name))) {
+        out.push(path.join(entry.name, nested))
+      }
+    }
+  }
+  return out.sort()
 }
 
 function statSnapshot(root: string): Map<string, { size: number; mtimeMs: number }> {
@@ -273,6 +288,110 @@ describe('exportBatch', () => {
     const file = path.join(tempDir('selight-export-file-'), 'not-a-dir')
     fs.writeFileSync(file, 'x')
     await expect(exportBatch(db, batch.id, file, () => undefined)).rejects.toBeInstanceOf(Error)
+  })
+
+  it('skips a whole folder whose name escapes the output root, fails its photos without writing outside', async () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    // Stored verbatim: the domain layer intentionally does not sanitize folder names.
+    const evil = createFolder(db, batch.id, path.join('..', '..', 'evil-export'))
+    const pick = createFolder(db, batch.id, '精选')
+    const fixture = makeFixtureTree()
+    await importFixture(db, batch.id, fixture.root)
+    const inbox = listPhotos(db, batch.id, { kind: 'inbox' })
+    const topA = inbox.find((p) => p.absPath === path.join(fixture.root, 'a.jpg'))!
+    const b = inbox.find((p) => p.filename === 'b.png')!
+    assignToFolder(db, [topA.id], evil.id)
+    assignToFolder(db, [b.id], pick.id)
+
+    // output sits two levels under the sandbox so a ../../ escape stays observable here.
+    const sandbox = tempDir('selight-export-sandbox-')
+    const output = path.join(sandbox, 'work', 'output')
+    fs.mkdirSync(output, { recursive: true })
+    const outputRel = path.join('work', 'output')
+    const outsideOutput = () =>
+      walkEntries(sandbox).filter((entry) => !entry.startsWith(outputRel))
+    const before = outsideOutput()
+    const progress: Array<[number, number]> = []
+
+    const result = await exportBatch(db, batch.id, output, (done, total) =>
+      progress.push([done, total])
+    )
+
+    // Nothing appeared anywhere outside the approved output directory.
+    expect(outsideOutput()).toEqual(before)
+    // The safe folder still exported; the escaping folder's photos never copied.
+    expect(result.copied).toBe(1)
+    expect(result.failures.join('\n')).toContain(topA.absPath)
+    expect(result.failures).not.toContain(b.absPath)
+    const exported = walkFiles(output).map((f) => path.relative(output, f))
+    expect(exported).toEqual([path.join('精选', 'b.png')])
+    // Every photo — including the skipped group — still settles the progress count.
+    expect(progress.at(-1)).toEqual([2, 2])
+  })
+
+  it('rejects a folder literally named ".." without mkdir outside the output tree', async () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const dotdot = createFolder(db, batch.id, '..')
+    const fixture = makeFixtureTree()
+    await importFixture(db, batch.id, fixture.root)
+    const topA = listPhotos(db, batch.id, { kind: 'inbox' }).find(
+      (p) => p.absPath === path.join(fixture.root, 'a.jpg')
+    )!
+    assignToFolder(db, [topA.id], dotdot.id)
+
+    const sandbox = tempDir('selight-export-sandbox-')
+    const output = path.join(sandbox, 'output')
+    fs.mkdirSync(output, { recursive: true })
+    const before = walkEntries(sandbox)
+
+    const result = await exportBatch(db, batch.id, output, () => undefined)
+
+    expect(walkEntries(sandbox)).toEqual(before)
+    expect(result.copied).toBe(0)
+    expect(result.failures).toHaveLength(1)
+    expect(result.failures[0]).toContain('越界')
+    expect(result.failures[0]).toContain(topA.absPath)
+    expect(fs.readdirSync(output)).toEqual([])
+  })
+
+  it('uses COPYFILE_EXCL and retries with a suffix when another writer wins the destination first', async () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const pick = createFolder(db, batch.id, '精选')
+    const fixture = makeFixtureTree()
+    await importFixture(db, batch.id, fixture.root)
+    const topA = listPhotos(db, batch.id, { kind: 'inbox' }).find(
+      (p) => p.absPath === path.join(fixture.root, 'a.jpg')
+    )!
+    assignToFolder(db, [topA.id], pick.id)
+    const output = tempDir('selight-export-out-')
+
+    const spy = vi.spyOn(fs.promises, 'copyFile')
+    // Simulate a racing writer: first EXCL attempt loses because "a.jpg" appears now.
+    spy.mockImplementationOnce(async (_src, dest) => {
+      fs.writeFileSync(dest, 'racer took it')
+      const err = new Error('EEXIST') as Error & { code: string }
+      err.code = 'EEXIST'
+      throw err
+    })
+    try {
+      const result = await exportBatch(db, batch.id, output, () => undefined)
+      expect(result).toEqual({ copied: 1, failures: [] })
+      // The no-overwrite flag reaches the syscall on every attempt.
+      expect(spy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        fs.constants.COPYFILE_EXCL
+      )
+      expect(fs.readFileSync(path.join(output, '精选', 'a.jpg'), 'utf8')).toBe(
+        'racer took it'
+      )
+      expect(fs.readFileSync(path.join(output, '精选', 'a (1).jpg'), 'utf8')).toBe('jpeg-a')
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('returns an empty result for a batch with no folder photos and never touches the output dir', async () => {
