@@ -8,11 +8,14 @@ import { createBatch } from '../../electron/domain/batches'
 import { createFolder, softDeleteFolder } from '../../electron/domain/folders'
 import { counts, listPhotos, upsertPhoto, type PhotoInput } from '../../electron/domain/photos'
 import {
+  FolderNotFoundError,
   MixedBatchError,
   assignToFolder,
+  deleteFolderWithPhotos,
   moveToTrash,
   restoreFromTrash
 } from '../../electron/domain/classify'
+import { listFolders } from '../../electron/domain/folders'
 
 const dirs: string[] = []
 const handles: Database[] = []
@@ -313,6 +316,80 @@ describe('classification actions', () => {
       to_status: 'folder',
       to_folder_id: folderB.id
     })
+  })
+
+  it('deleteFolderWithPhotos soft-deletes the folder and moves its folder photos to inbox in one group', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, '精选')
+    const other = createFolder(db, batch.id, 'other')
+    const inFolder = [
+      addPhoto(db, batch.id, 'E:/photos/a.jpg'),
+      addPhoto(db, batch.id, 'E:/photos/b.jpg')
+    ]
+    const trashedFromFolder = addPhoto(db, batch.id, 'E:/photos/c.jpg')
+    const staysInOther = addPhoto(db, batch.id, 'E:/photos/d.jpg')
+    assignToFolder(db, inFolder, folder.id)
+    assignToFolder(db, [trashedFromFolder], folder.id)
+    moveToTrash(db, [trashedFromFolder])
+    assignToFolder(db, [staysInOther], other.id)
+
+    const moved = deleteFolderWithPhotos(db, folder.id)
+
+    expect(moved).toBe(2)
+    expect(listFolders(db, batch.id).map((f) => f.id)).not.toContain(folder.id)
+    for (const id of inFolder) {
+      expect(photoState(db, id)).toEqual({ status: 'inbox', folder_id: null })
+    }
+    // Trash photos only retain the folder id; they are not folder photos and stay trashed.
+    expect(photoState(db, trashedFromFolder)).toEqual({
+      status: 'trash',
+      folder_id: folder.id
+    })
+    expect(photoState(db, staysInOther)).toEqual({ status: 'folder', folder_id: other.id })
+
+    const deleteActions = listActions(db, batch.id).filter(
+      (a) => a.to_status === 'inbox' && a.to_folder_id === null && a.from_status === 'folder'
+    )
+    expect(deleteActions).toHaveLength(2)
+    expect(distinctGroups(db, batch.id)).toBeGreaterThan(0)
+    expect(new Set(deleteActions.map((a) => a.batch_id_group)).size).toBe(1)
+    expect(
+      deleteActions.every(
+        (a) => a.from_folder_id === folder.id && a.undone === 0
+      )
+    ).toBe(true)
+  })
+
+  it('deleteFolderWithPhotos on an empty folder soft-deletes it without writing any action rows', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, 'empty')
+
+    expect(deleteFolderWithPhotos(db, folder.id)).toBe(0)
+
+    expect(listFolders(db, batch.id).map((f) => f.id)).not.toContain(folder.id)
+    expect(actionCount(db)).toBe(0)
+  })
+
+  it('deleteFolderWithPhotos throws FolderNotFoundError on unknown or already-deleted ids and rolls back', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, 'f')
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+    assignToFolder(db, [photoId], folder.id)
+
+    expect(() => deleteFolderWithPhotos(db, 999_999)).toThrowError(FolderNotFoundError)
+    // Nothing changed: folder live, photo still in it, only the assign action exists.
+    expect(listFolders(db, batch.id).map((f) => f.id)).toContain(folder.id)
+    expect(photoState(db, photoId)).toEqual({ status: 'folder', folder_id: folder.id })
+    expect(actionCount(db)).toBe(1)
+
+    expect(deleteFolderWithPhotos(db, folder.id)).toBe(1)
+    expect(() => deleteFolderWithPhotos(db, folder.id)).toThrowError(FolderNotFoundError)
+    // Failed repeat changed nothing: still one action group's worth of rows, photo stays in inbox.
+    expect(actionCount(db)).toBe(2)
+    expect(photoState(db, photoId)).toEqual({ status: 'inbox', folder_id: null })
   })
 
   it('restore fallback to a soft-deleted folder writes an explicit trash/folder → inbox/NULL audit row', () => {

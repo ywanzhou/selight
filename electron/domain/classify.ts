@@ -15,6 +15,13 @@ export class MixedBatchError extends Error {
   }
 }
 
+export class FolderNotFoundError extends Error {
+  constructor(folderId: number) {
+    super(`folder not found or already deleted: ${folderId}`)
+    this.name = 'FolderNotFoundError'
+  }
+}
+
 interface Target {
   status: PhotoStatus
   folderId: number | null
@@ -111,4 +118,47 @@ export function restoreFromTrash(db: Database, photoIds: number[]): number {
     }
     return { status: 'inbox', folderId: null }
   })
+}
+
+// Ruling 12: one transaction soft-deletes the folder and returns every folder photo to inbox,
+// logging one action per photo under a single new group so one undo restores everything.
+// An empty folder is still soft-deleted and writes no action rows.
+export function deleteFolderWithPhotos(db: Database, folderId: number): number {
+  return db.transaction(() => {
+    const folder = db
+      .prepare('SELECT id, batch_id FROM folders WHERE id = ? AND deleted_at IS NULL')
+      .get(folderId) as { id: number; batch_id: number } | undefined
+    if (!folder) throw new FolderNotFoundError(folderId)
+
+    const now = Date.now()
+    db.prepare('UPDATE folders SET deleted_at = ? WHERE id = ?').run(now, folderId)
+
+    const photos = db
+      .prepare("SELECT id FROM photos WHERE status = 'folder' AND folder_id = ?")
+      .all(folderId) as { id: number }[]
+    if (photos.length === 0) return 0
+
+    const groupId = nextGroupId(db, folder.batch_id)
+    const updatePhoto = db.prepare(
+      'UPDATE photos SET status = ?, folder_id = ?, updated_at = ? WHERE id = ?'
+    )
+    const insertAction = db.prepare(
+      `INSERT INTO actions
+         (batch_id, batch_id_group, photo_id, from_status, from_folder_id, to_status, to_folder_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    for (const photo of photos) {
+      updatePhoto.run('inbox', null, now, photo.id)
+      insertAction.run(
+        folder.batch_id,
+        groupId,
+        photo.id,
+        'folder',
+        folderId,
+        'inbox',
+        null
+      )
+    }
+    return photos.length
+  })()
 }
