@@ -104,8 +104,9 @@ function missingFlag(db: Database, absPath: string): number {
 describe('scanDirectory', () => {
   it('recursively finds supported photos, filters extensions, and lowercases ext', async () => {
     const root = makeFixtureTree()
-    const files = await scanDirectory(root, fixedReader)
+    const { files, failures } = await scanDirectory(root, fixedReader)
     const map = byPath(files)
+    expect(failures).toEqual([])
 
     expect(files).toHaveLength(6)
     expect([...map.keys()].sort()).toEqual(
@@ -143,7 +144,7 @@ describe('scanDirectory', () => {
       }
     }
 
-    const files = await scanDirectory(root, failingReader)
+    const { files } = await scanDirectory(root, failingReader)
     const map = byPath(files)
 
     expect(files).toHaveLength(6)
@@ -151,9 +152,11 @@ describe('scanDirectory', () => {
     expect(map.get(path.join(root, 'b.JPG'))?.orientation).toBe(8)
   })
 
-  it('returns an empty list instead of throwing when the root dir is unreadable', async () => {
+  it('returns no files and records the skipped path when the root dir is unreadable', async () => {
     const root = path.join(tempDir('selight-scan-missing-'), 'does-not-exist')
-    await expect(scanDirectory(root, fixedReader)).resolves.toEqual([])
+    const result = await scanDirectory(root, fixedReader)
+    expect(result.files).toEqual([])
+    expect(result.failures).toContain(root)
   })
 
   it('reads read-only fixtures while a source file stays open under a read-only flag', async () => {
@@ -163,7 +166,7 @@ describe('scanDirectory', () => {
     // Holding an 'r' handle is fine; any write-mode open by the scanner would fail on Windows.
     openFds.push(fs.openSync(path.join(root, 'a.jpg'), 'r'))
 
-    const files = await scanDirectory(root, fixedReader)
+    const { files } = await scanDirectory(root, fixedReader)
     expect(files).toHaveLength(6)
     expect(files.find((f) => f.filename === 'a.jpg')?.sizeBytes).toBe(
       Buffer.byteLength('jpeg-a')
@@ -178,19 +181,19 @@ describe('importScanned', () => {
     const batch = createBatch(db)
     const sourceId = addSource(db, batch.id, root)
 
-    const first = importScanned(db, batch.id, sourceId, await scanDirectory(root, fixedReader))
+    const first = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(first).toEqual({ added: 6, updated: 0, missing: 0 })
     expect(
       (db.prepare('SELECT COUNT(*) AS n FROM photos').get() as { n: number }).n
     ).toBe(6)
 
-    const second = importScanned(db, batch.id, sourceId, await scanDirectory(root, fixedReader))
+    const second = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(second).toEqual({ added: 0, updated: 6, missing: 0 })
 
     // Delete one fixture file: rescan no longer sees it, so the existing row goes missing.
     const gone = path.join(root, 'd.arw')
     fs.rmSync(gone)
-    const third = importScanned(db, batch.id, sourceId, await scanDirectory(root, fixedReader))
+    const third = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(third.added).toBe(0)
     expect(third.missing).toBe(1)
     expect(missingFlag(db, gone)).toBe(1)
@@ -198,7 +201,7 @@ describe('importScanned', () => {
     // Ruling 9: the file reappears; a mtime/size-identical upsert cannot clear missing itself,
     // so importScanned must reset the flag for paths present in the scan before markMissing.
     writeFile(root, 'd.arw', 'raw-a')
-    const fourth = importScanned(db, batch.id, sourceId, await scanDirectory(root, fixedReader))
+    const fourth = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(fourth).toEqual({ added: 0, updated: 6, missing: 0 })
     expect(missingFlag(db, gone)).toBe(0)
   })
@@ -210,7 +213,7 @@ describe('importScanned', () => {
     const batch = createBatch(db)
     const sourceId = addSource(db, batch.id, root)
 
-    const result = importScanned(db, batch.id, sourceId, await scanDirectory(root, fixedReader))
+    const result = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(result.added).toBe(6)
     expect(result.missing).toBe(0)
   })

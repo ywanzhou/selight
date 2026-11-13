@@ -165,18 +165,31 @@ export function counts(
     .get(batchId) as { total: number; inbox: number; folder: number; trash: number }
 }
 
+// Bound-variable safety margin below SQLite's 32766 limit, matching the present-path
+// reset chunking in scanner.ts.
+const MARK_MISSING_CHUNK = 500
+
 export function markMissing(
   db: Database,
   batchId: number,
   existingPaths: Set<string>
 ): number {
-  const paths = [...existingPaths]
-  // shortcut: one bound variable per path (SQLite limit 32766); chunk the UPDATE if a batch ever exceeds ~32k photos.
-  const sql =
-    paths.length === 0
-      ? 'UPDATE photos SET missing = 1 WHERE batch_id = ? AND missing = 0'
-      : `UPDATE photos SET missing = 1
-         WHERE batch_id = ? AND missing = 0
-           AND abs_path NOT IN (${paths.map(() => '?').join(', ')})`
-  return db.prepare(sql).run(batchId, ...paths).changes
+  // NOT IN cannot be split across statements: a present row whose path sits in another
+  // chunk would satisfy "NOT IN this chunk" and get wrongly flagged. Membership is
+  // therefore tested against the JS set, and only the id UPDATE is chunked (Ruling: 500).
+  const rows = db
+    .prepare('SELECT id, abs_path FROM photos WHERE batch_id = ? AND missing = 0')
+    .all(batchId) as { id: number; abs_path: string }[]
+  const absentIds = rows.filter((row) => !existingPaths.has(row.abs_path)).map((row) => row.id)
+
+  let changed = 0
+  for (let i = 0; i < absentIds.length; i += MARK_MISSING_CHUNK) {
+    const slice = absentIds.slice(i, i + MARK_MISSING_CHUNK)
+    changed += db
+      .prepare(
+        `UPDATE photos SET missing = 1 WHERE id IN (${slice.map(() => '?').join(', ')})`
+      )
+      .run(...slice).changes
+  }
+  return changed
 }

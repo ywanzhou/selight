@@ -1,8 +1,8 @@
+import type { SelightApi } from './shared/api'
+
 declare global {
   interface Window {
-    api: {
-      platform: string
-    }
+    selight: SelightApi
   }
 }
 

@@ -37,32 +37,41 @@ const SUPPORTED_EXT = new Set([
 // Bound-variable safety margin below SQLite's 32766 limit for the missing-reset IN clause.
 const RESET_CHUNK = 500
 
+export interface ScanResult {
+  files: ScannedFile[]
+  /** Paths skipped because a directory or file could not be read (Ruling 15). */
+  failures: string[]
+}
+
 export async function scanDirectory(
   root: string,
   reader: ExifReader
-): Promise<ScannedFile[]> {
-  const out: ScannedFile[] = []
-  await walk(root, reader, out)
-  return out
+): Promise<ScanResult> {
+  const files: ScannedFile[] = []
+  const failures: string[] = []
+  await walk(root, reader, files, failures)
+  return { files, failures }
 }
 
 async function walk(
   dir: string,
   reader: ExifReader,
-  out: ScannedFile[]
+  out: ScannedFile[],
+  failures: string[]
 ): Promise<void> {
   let entries: fs.Dirent[]
   try {
     entries = await fs.promises.readdir(dir, { withFileTypes: true })
   } catch {
-    // Unreadable or missing directory: skip it instead of aborting the whole scan.
+    // Unreadable or missing directory: record it and skip instead of aborting the scan.
+    failures.push(dir)
     return
   }
 
   for (const entry of entries) {
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await walk(absPath, reader, out)
+      await walk(absPath, reader, out, failures)
       continue
     }
     if (!entry.isFile()) continue
@@ -74,7 +83,8 @@ async function walk(
     try {
       stats = await fs.promises.stat(absPath)
     } catch {
-      // Unreadable file: record nothing and keep scanning.
+      // Unreadable file: record the skipped path and keep scanning.
+      failures.push(absPath)
       continue
     }
 

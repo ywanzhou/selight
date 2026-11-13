@@ -312,4 +312,29 @@ describe('photo domain module', () => {
     expect(markMissing(db, batch.id, new Set())).toBe(2)
     expect(markMissing(db, other.id, new Set())).toBe(1)
   })
+
+  it('markMissing stays correct past the 500-id chunk boundary and never flags present rows', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const total = 600
+    const rows = Array.from({ length: total }, (_, i) =>
+      upsertPhoto(db, makeInput(db, batch.id, `E:/photos/p-${i}.jpg`)).row
+    )
+
+    // 50 present → 550 absent, so the id UPDATE spans the 500-row chunk (500 + 50).
+    const present = new Set(rows.slice(0, 50).map((r) => r.absPath))
+    expect(markMissing(db, batch.id, present)).toBe(550)
+
+    const reloaded = listPhotos(db, batch.id, { kind: 'inbox' })
+    expect(reloaded.filter((r) => r.missing === 1)).toHaveLength(550)
+    // Present rows stay present even though their ids are split across chunks.
+    expect(reloaded.filter((r) => r.missing === 0).map((r) => r.absPath).sort()).toEqual(
+      [...present].sort()
+    )
+
+    // Idempotent: already-flagged rows are not counted again.
+    expect(markMissing(db, batch.id, present)).toBe(0)
+    // An empty present set then flags the 50 that remained.
+    expect(markMissing(db, batch.id, new Set())).toBe(50)
+  })
 })

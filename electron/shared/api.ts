@@ -1,0 +1,83 @@
+// The single window.selight contract shared by main (handler registration), preload
+// (contextBridge wrapper) and renderer (typed calls). Type-only imports are erased at
+// build time, so this module carries no runtime dependency and is safe to share across
+// the main/preload/renderer bundles and the bare-node Vitest suite.
+import type { BatchRow } from '../domain/batches'
+import type { FolderRow } from '../domain/folders'
+import type { PhotoRow, View } from '../domain/photos'
+
+export type { BatchRow, FolderRow, PhotoRow, View }
+
+export type MediaKind = 'thumb' | 'photo'
+
+export interface Counts {
+  total: number
+  inbox: number
+  folder: number
+  trash: number
+}
+
+// First-paint bundle returned when opening a batch. Photos are the default inbox view;
+// later navigation re-pulls a single view through listView (the store's refresh path).
+export interface BatchState {
+  batch: BatchRow
+  folders: FolderRow[]
+  counts: Counts
+  photos: PhotoRow[]
+}
+
+export interface ImportResult {
+  added: number
+  updated: number
+  missing: number
+  /** Skipped unreadable files/directories, surfaced to the renderer instead of aborting. */
+  failures: string[]
+}
+
+// Every method is Promise-returning so the preload can wrap ipcRenderer.invoke 1:1.
+// Batch-scoped calls take batchId explicitly: the handler factory holds no mutable
+// "current batch", keeping it pure and per-batch isolation testable. exportBatch is
+// deliberately absent — Task 17 adds the exporter, its handler and progress event.
+export interface SelightApi {
+  listBatches(): Promise<BatchRow[]>
+  createBatch(name?: string): Promise<BatchRow>
+  openBatch(batchId: number): Promise<BatchState>
+
+  listFolders(batchId: number): Promise<FolderRow[]>
+  createFolder(batchId: number, name: string): Promise<FolderRow>
+  renameFolder(folderId: number, name: string): Promise<void>
+  deleteFolder(folderId: number): Promise<number>
+
+  importDirectory(batchId: number, rootPath: string): Promise<ImportResult>
+  listView(batchId: number, view: View): Promise<PhotoRow[]>
+  counts(batchId: number): Promise<Counts>
+  mediaUrl(photoId: number, kind: MediaKind): Promise<string>
+  markSelection(ids: number[]): Promise<void>
+
+  assign(photoIds: number[], folderId: number): Promise<number>
+  trash(photoIds: number[]): Promise<number>
+  restore(photoIds: number[]): Promise<number>
+  undo(batchId: number): Promise<boolean>
+}
+
+// Channel names shared by preload (invoke) and main (handle), so the two cannot drift.
+export const IPC_CHANNELS = {
+  batchList: 'selight:batch:list',
+  batchCreate: 'selight:batch:create',
+  batchOpen: 'selight:batch:open',
+  folderList: 'selight:folder:list',
+  folderCreate: 'selight:folder:create',
+  folderRename: 'selight:folder:rename',
+  folderDelete: 'selight:folder:delete',
+  photoImport: 'selight:photo:import',
+  photoListView: 'selight:photo:list-view',
+  photoCounts: 'selight:photo:counts',
+  photoMediaUrl: 'selight:photo:media-url',
+  photoMarkSelection: 'selight:photo:mark-selection',
+  classifyAssign: 'selight:classify:assign',
+  classifyTrash: 'selight:classify:trash',
+  classifyRestore: 'selight:classify:restore',
+  classifyUndo: 'selight:classify:undo',
+  // Main → renderer notice only; no invoke handler is registered for this channel.
+  dbRecovered: 'selight:db:recovered'
+} as const
