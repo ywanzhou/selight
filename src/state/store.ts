@@ -84,7 +84,11 @@ export function reducer(state: AppState, action: Action): AppState {
       // Mirror of the selection model owned by SelectionProvider/useSelection.
       return { ...state, selection: action.ids }
     case 'loading':
-      return { ...state, loading: action.loading }
+      // Starting a new async chain (boot retry, batch open) clears the previous
+      // error so a successful retry cannot leave the shell on the stale ErrorState.
+      return action.loading
+        ? { ...state, loading: true, error: null }
+        : { ...state, loading: false }
     case 'error':
       // Every failure lands here so the shell can never stick on loading=true.
       return { ...state, loading: false, error: action.error }
@@ -168,11 +172,46 @@ export async function boot(deps: ThunkDeps): Promise<void> {
     // listBatches is last_opened_at DESC, so index 0 is the most recent batch.
     const batches = await deps.api.listBatches()
     deps.dispatch({ type: 'batches', batches })
-    if (batches[0]) {
-      const opened = await deps.api.openBatch(batches[0].id)
-      deps.dispatch({ type: 'opened', state: opened })
-    } else {
+
+    const session = await deps.api.getSession()
+    const sessionBatchId =
+      session && batches.some((b) => b.id === session.batchId)
+        ? session.batchId
+        : null
+    const targetId = sessionBatchId ?? batches[0]?.id ?? null
+
+    if (targetId === null) {
       deps.dispatch({ type: 'loading', loading: false })
+      return
+    }
+
+    const opened = await deps.api.openBatch(targetId)
+    deps.dispatch({ type: 'opened', state: opened })
+
+    // Restore the saved view only inside its still-existing batch. A folder view
+    // whose folder was deleted falls back to inbox; inbox needs no re-pull because
+    // openBatch already returned the inbox photos. The pull is explicit rather than
+    // switchView(): the 'opened' dispatch has not rendered yet, so getState() would
+    // still read the pre-open batchId and the thunk would no-op.
+    if (session && sessionBatchId !== null) {
+      const savedView = session.view
+      const folderExists =
+        savedView.kind !== 'folder' ||
+        opened.folders.some((f) => f.id === savedView.folderId)
+      if (folderExists && savedView.kind !== 'inbox') {
+        const [photos, restoredCounts, restoredFolders] = await Promise.all([
+          deps.api.listView(targetId, savedView),
+          deps.api.counts(targetId),
+          deps.api.listFolders(targetId)
+        ])
+        deps.dispatch({
+          type: 'refreshed',
+          view: savedView,
+          photos,
+          counts: restoredCounts,
+          folders: restoredFolders
+        })
+      }
     }
   } catch (e) {
     deps.dispatch({ type: 'error', error: errorMessage(e) })
@@ -219,6 +258,15 @@ export function AppStoreProvider({
   useEffect(() => {
     void boot(deps)
   }, [deps])
+
+  // Persist every settled batchId/view change. The loading/error guards skip the
+  // pre-hydration null state and failed boots, which must not overwrite a good
+  // session; a null batchId writes the null-style state for the empty workspace.
+  const { batchId, view, loading, error } = state
+  useEffect(() => {
+    if (loading || error !== null) return
+    void api.saveSession({ batchId, view }).catch(() => undefined)
+  }, [api, batchId, view, loading, error])
 
   const store: AppStore = {
     state,

@@ -10,11 +10,14 @@ import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
 import { createHandlers } from './ipc'
-import { IPC_CHANNELS, type MediaKind, type View } from './shared/api'
+import { createFileSessionStore } from './sessionStore'
+import type { SessionStore } from './session'
+import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './shared/api'
 
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
 let thumbQueue: MediaQueue | null = null
+let sessionStore: SessionStore | null = null
 let isQuitting = false
 
 function createWindow(): BrowserWindow {
@@ -62,7 +65,8 @@ app.whenReady().then(() => {
 
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(db, roots, exifReader)
-  const handlers = createHandlers({ db, thumbQueue, exifReader })
+  sessionStore = createFileSessionStore(path.join(userData, 'session.json'))
+  const handlers = createHandlers({ db, thumbQueue, exifReader, sessionStore })
 
   ipcMain.handle(IPC_CHANNELS.batchList, () => handlers.listBatches())
   ipcMain.handle(IPC_CHANNELS.batchCreate, (_event, name?: string) =>
@@ -122,6 +126,11 @@ app.whenReady().then(() => {
     handlers.undo(batchId)
   )
 
+  ipcMain.handle(IPC_CHANNELS.sessionGet, () => handlers.getSession())
+  ipcMain.handle(IPC_CHANNELS.sessionSave, (_event, state: SessionState) =>
+    handlers.saveSession(state)
+  )
+
   // Native dialog stays in main: the sandboxed renderer has no Electron access, and
   // createHandlers is Electron-free so its contract runs under bare Node.
   ipcMain.handle(IPC_CHANNELS.dialogPickDirectory, async () => {
@@ -168,6 +177,8 @@ app.on('will-quit', (event) => {
   isQuitting = true
   void (async () => {
     try {
+      // Land any debounced session change before the process exits.
+      sessionStore?.flush()
       // Stop starting new thumbnail work; in-flight tasks are allowed to finish.
       thumbQueue?.stop()
       try {

@@ -30,6 +30,9 @@ const api: SelightApi = {
   restore: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyRestore, photoIds),
   undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId),
 
+  getSession: () => ipcRenderer.invoke(IPC_CHANNELS.sessionGet),
+  saveSession: (state) => ipcRenderer.invoke(IPC_CHANNELS.sessionSave, state),
+
   // Renderer-only capability: native dialog handled in main, outside the pure factory.
   pickDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.dialogPickDirectory),
 

@@ -5,8 +5,9 @@
 import type { BatchRow } from '../domain/batches'
 import type { FolderRow } from '../domain/folders'
 import type { PhotoRow, View } from '../domain/photos'
+import type { SessionState } from '../session'
 
-export type { BatchRow, FolderRow, PhotoRow, View }
+export type { BatchRow, FolderRow, PhotoRow, View, SessionState }
 
 export type MediaKind = 'thumb' | 'photo'
 
@@ -59,6 +60,11 @@ export interface SelightHandlers {
   trash(photoIds: number[]): Promise<number>
   restore(photoIds: number[]): Promise<number>
   undo(batchId: number): Promise<boolean>
+
+  // Session restore; the file storage is injected into createHandlers, so the
+  // factory stays electron-free and the contract runs under bare Node.
+  getSession(): Promise<SessionState | null>
+  saveSession(state: SessionState): Promise<void>
 }
 
 // Full window.selight surface: the invoke handlers plus the two renderer-only
@@ -91,6 +97,8 @@ export const IPC_CHANNELS = {
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',
   classifyUndo: 'selight:classify:undo',
+  sessionGet: 'selight:session:get',
+  sessionSave: 'selight:session:save',
   // Main-only dialog invoke; deliberately absent from SelightHandlers/createHandlers.
   dialogPickDirectory: 'selight:dialog:pick-directory',
   // Main → renderer notice only; no invoke handler is registered for this channel.

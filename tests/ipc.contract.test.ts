@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -7,6 +7,7 @@ import { openDatabase } from '../electron/db/schema'
 import { createHandlers, type HandlerDeps } from '../electron/ipc'
 import type { ExifReader } from '../electron/scanner'
 import type { MediaQueue } from '../electron/media/queue'
+import type { SessionState, SessionStore } from '../electron/session'
 import { IPC_CHANNELS, type SelightApi, type SelightHandlers } from '../electron/shared/api'
 
 // This suite is the end-to-end domain chain driven through the pure handler factory.
@@ -22,6 +23,7 @@ interface Setup {
   handlers: SelightHandlers
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
+  sessionStore: SessionStore
 }
 
 function setup(): Setup {
@@ -38,8 +40,16 @@ function setup(): Setup {
     prioritize: (ids) => queueCalls.prioritize.push([...ids])
   }
 
-  const deps: HandlerDeps = { db, thumbQueue, exifReader: fakeReader }
-  return { handlers: createHandlers(deps), db, queueCalls }
+  // Fake session storage: the handler stays electron-free; the real file store is
+  // covered in tests/domain/session.test.ts.
+  const sessionStore: SessionStore = {
+    read: vi.fn(() => null),
+    write: vi.fn(),
+    flush: vi.fn()
+  }
+
+  const deps: HandlerDeps = { db, thumbQueue, exifReader: fakeReader, sessionStore }
+  return { handlers: createHandlers(deps), db, queueCalls, sessionStore }
 }
 
 afterEach(() => {
@@ -275,6 +285,22 @@ describe('IPC handler contract — full curation chain', () => {
     const batch = await handlers.createBatch()
     expect(await handlers.undo(batch.id)).toBe(false)
   })
+
+  it('getSession/saveSession delegate straight to the injected session store', async () => {
+    const { handlers, sessionStore } = setup()
+    const read = vi.mocked(sessionStore.read)
+    const write = vi.mocked(sessionStore.write)
+
+    expect(await handlers.getSession()).toBeNull()
+    expect(read).toHaveBeenCalledTimes(1)
+
+    const state: SessionState = { batchId: 5, view: { kind: 'folder', folderId: 9 } }
+    await handlers.saveSession(state)
+    expect(write).toHaveBeenCalledWith(state)
+
+    read.mockReturnValue(state)
+    expect(await handlers.getSession()).toEqual(state)
+  })
 })
 
 // The preload cannot run under bare Node, so the push-event path is split: the channel
@@ -283,6 +309,8 @@ describe('IPC handler contract — full curation chain', () => {
 describe('window.selight db-recovery push surface', () => {
   it('pins the recovery channel constant and the onDbRecovered subscription shape', () => {
     expect(IPC_CHANNELS.dbRecovered).toBe('selight:db:recovered')
+    expect(IPC_CHANNELS.sessionGet).toBe('selight:session:get')
+    expect(IPC_CHANNELS.sessionSave).toBe('selight:session:save')
 
     // Type-level structural assertion, erased at runtime but enforced by tsc:
     // SelightApi must expose onDbRecovered as (cb: () => void) => unsubscribe.

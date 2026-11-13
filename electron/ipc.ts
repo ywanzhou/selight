@@ -11,7 +11,13 @@ import {
 import { undoLastGroup } from './domain/actions'
 import { importScanned, scanDirectory, type ExifReader } from './scanner'
 import type { MediaQueue } from './media/queue'
-import type { BatchState, ImportResult, SelightHandlers } from './shared/api'
+import type { SessionStore } from './session'
+import type {
+  BatchState,
+  ImportResult,
+  SelightHandlers,
+  SessionState
+} from './shared/api'
 
 // No electron import in this file: every dependency is injected so the whole handler
 // contract runs under bare Node in tests/ipc.contract.test.ts. Domain errors are never
@@ -21,6 +27,7 @@ export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   exifReader: ExifReader
+  sessionStore: Pick<SessionStore, 'read' | 'write'>
 }
 
 // 500 bound variables per statement, matching the scanner/photos chunking and staying
@@ -65,7 +72,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, exifReader } = deps
+  const { db, thumbQueue, exifReader, sessionStore } = deps
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -150,6 +157,15 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
 
     async undo(batchId) {
       return undoLastGroup(db, batchId)
+    },
+
+    // ---- session ----------------------------------------------------------
+    async getSession(): Promise<SessionState | null> {
+      return sessionStore.read()
+    },
+
+    async saveSession(state: SessionState): Promise<void> {
+      sessionStore.write(state)
     }
   }
 }

@@ -3,6 +3,7 @@ import type {
   BatchRow,
   BatchState,
   Counts,
+  FolderRow,
   SelightApi
 } from '../../electron/shared/api'
 import {
@@ -38,7 +39,9 @@ const HANDLER_NAMES = [
   'trash',
   'restore',
   'undo',
-  'pickDirectory'
+  'pickDirectory',
+  'getSession',
+  'saveSession'
 ] as const
 
 function makeApi(overrides: Partial<Record<keyof SelightApi, unknown>> = {}): SelightApi {
@@ -136,6 +139,123 @@ describe('store boot chain', () => {
 
     expect(h.state.loading).toBe(false)
     expect(h.state.error).toBe('batch missing')
+  })
+
+  const batch2: BatchRow = { id: 2, name: 'second', createdAt: 3, lastOpenedAt: 4 }
+  const folder: FolderRow = {
+    id: 9,
+    batchId: 2,
+    name: '精选',
+    sortOrder: 1,
+    createdAt: 1,
+    deletedAt: null
+  }
+  const opened2: BatchState = {
+    batch: batch2,
+    folders: [folder],
+    counts: zeroCounts,
+    photos: []
+  }
+
+  it('restores the saved batch and its folder view at boot', async () => {
+    const listView = vi.fn(async () => [])
+    const countsFn = vi.fn(async () => zeroCounts)
+    const listFolders = vi.fn(async () => [folder])
+    const open = vi.fn(async () => opened2)
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch2, batch]),
+      openBatch: open,
+      getSession: vi.fn(async () => ({
+        batchId: 2,
+        view: { kind: 'folder', folderId: 9 }
+      })),
+      listView,
+      counts: countsFn,
+      listFolders
+    })
+    const h = harness(api)
+
+    await boot(h.deps)
+
+    // The saved batch wins over the most-recent ordering.
+    expect(open).toHaveBeenCalledWith(2)
+    expect(h.state.batchId).toBe(2)
+    expect(h.state.view).toEqual({ kind: 'folder', folderId: 9 })
+    expect(listView).toHaveBeenCalledWith(2, { kind: 'folder', folderId: 9 })
+  })
+
+  it('restores a saved trash view at boot', async () => {
+    const listView = vi.fn(async () => [])
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch2]),
+      openBatch: vi.fn(async () => opened2),
+      getSession: vi.fn(async () => ({ batchId: 2, view: { kind: 'trash' } })),
+      listView,
+      counts: vi.fn(async () => zeroCounts),
+      listFolders: vi.fn(async () => [folder])
+    })
+    const h = harness(api)
+
+    await boot(h.deps)
+
+    expect(h.state.view).toEqual({ kind: 'trash' })
+    expect(listView).toHaveBeenCalledWith(2, { kind: 'trash' })
+  })
+
+  it('falls back to inbox when the saved folder no longer exists', async () => {
+    const listView = vi.fn(async () => [])
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch2]),
+      openBatch: vi.fn(async () => ({ ...opened2, folders: [] })),
+      getSession: vi.fn(async () => ({
+        batchId: 2,
+        view: { kind: 'folder', folderId: 99 }
+      })),
+      listView
+    })
+    const h = harness(api)
+
+    await boot(h.deps)
+
+    expect(h.state.view).toEqual({ kind: 'inbox' })
+    expect(listView).not.toHaveBeenCalled()
+  })
+
+  it('ignores a session whose batch was deleted and opens the most recent batch at inbox', async () => {
+    const open = vi.fn(async () => opened)
+    const listView = vi.fn(async () => [])
+    const api = makeApi({
+      listBatches: vi.fn(async () => [batch]),
+      openBatch: open,
+      getSession: vi.fn(async () => ({ batchId: 99, view: { kind: 'trash' } })),
+      listView
+    })
+    const h = harness(api)
+
+    await boot(h.deps)
+
+    expect(open).toHaveBeenCalledWith(1)
+    expect(h.state.batchId).toBe(1)
+    expect(h.state.view).toEqual({ kind: 'inbox' })
+    expect(listView).not.toHaveBeenCalled()
+  })
+
+  it('resets a stale error at boot so a successful retry shows the empty state', async () => {
+    const listBatches = vi.fn()
+    listBatches
+      .mockRejectedValueOnce(new Error('db locked'))
+      .mockResolvedValueOnce([])
+    const api = makeApi({ listBatches })
+    const h = harness(api)
+
+    await boot(h.deps)
+    expect(h.state.error).toBe('db locked')
+    expect(h.state.loading).toBe(false)
+
+    await boot(h.deps)
+    expect(h.state.error).toBeNull()
+    expect(h.state.loading).toBe(false)
+    expect(h.state.batchId).toBeNull()
   })
 })
 
