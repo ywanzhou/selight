@@ -2,21 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import Toolbar from './components/Toolbar'
 import ThumbPane from './components/ThumbPane'
 import PreviewPane from './components/PreviewPane'
+import FolderCards from './components/FolderCards'
 import { FolderIcon, PlusIcon } from './components/icons'
 import { useShortcuts } from './hooks/useShortcuts'
 import { AppStoreProvider, useAppStore } from './state/store'
 import { SelectionProvider } from './state/selectionContext'
-
-function FolderCardsPane() {
-  return (
-    <aside className="sidebar right frosted hairline-left">
-      <div className="side-head">
-        <span>文件夹</span>
-      </div>
-      <p className="pane-placeholder">文件夹卡片即将上线</p>
-    </aside>
-  )
-}
 
 function EmptyState() {
   const { createBatch } = useAppStore()
@@ -117,7 +107,7 @@ function Workspace({ modalOpen }: { modalOpen: boolean }) {
     <div className="app-body">
       <ThumbPane />
       <PreviewPane />
-      <FolderCardsPane />
+      <FolderCards />
     </div>
   )
 }

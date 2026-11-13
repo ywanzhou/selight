@@ -1,8 +1,9 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, type DragEvent } from 'react'
 import { Grid } from 'react-window'
 import type { PhotoRow, View } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
+import { DROP_MIME } from '../state/drop'
 import GridCell, { type ThumbCellData } from './ThumbCell'
 import { ChevronLeftIcon } from './icons'
 
@@ -42,11 +43,16 @@ function emptyText(view: View): string {
   }
 }
 
+function showError(e: unknown): void {
+  window.alert(e instanceof Error ? e.message : String(e))
+}
+
 export default function ThumbPane() {
-  const { state } = useAppStore()
+  const { state, refresh, switchView } = useAppStore()
   const { batchId, view, photos, folders } = state
 
-  const { selected, anchor, nonce, toggle } = useSelectionContext()
+  const selection = useSelectionContext()
+  const { selected, anchor, nonce, toggle } = selection
 
   // Remount on batch/view switch: resets scroll position and prevents recycled
   // slots from briefly showing the previous view's photos at the same indices.
@@ -62,10 +68,10 @@ export default function ThumbPane() {
     (
       _visible: { columnStartIndex: number; columnStopIndex: number },
       allCells: {
-        rowStartIndex: number
-        rowStopIndex: number
-        columnStartIndex: number
-        columnStopIndex: number
+        rowStartIndex: number;
+        rowStopIndex: number;
+        columnStartIndex: number;
+        columnStopIndex: number;
       }
     ) => {
       const ids: number[] = []
@@ -83,6 +89,39 @@ export default function ThumbPane() {
     [photos]
   )
 
+  // HTML5 drag source. The payload is the whole current selection; dragging an
+  // unselected photo first collapses the selection to just that photo. The ref
+  // is dropped on dragend so a canceled drag leaves no stale payload behind.
+  const dragIdsRef = useRef<number[]>([])
+  const handleDragStart = useCallback(
+    (id: number, e: DragEvent<HTMLDivElement>) => {
+      let ids = [...selected]
+      if (!selected.has(id)) {
+        toggle(id)
+        ids = [id]
+      }
+      dragIdsRef.current = ids
+      e.dataTransfer.setData(DROP_MIME, JSON.stringify(ids))
+      e.dataTransfer.effectAllowed = 'move'
+    },
+    [selected, toggle]
+  )
+  const handleDragEnd = useCallback(() => {
+    dragIdsRef.current = []
+  }, [])
+
+  const restoreSelection = useCallback(async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    try {
+      // Domain decides folder vs inbox return; refresh re-pulls the trash view.
+      await window.selight.restore(ids)
+      await refresh()
+    } catch (e) {
+      showError(e)
+    }
+  }, [selected, refresh])
+
   const folderName =
     view.kind === 'folder'
       ? folders.find((f) => f.id === view.folderId)?.name
@@ -96,7 +135,9 @@ export default function ThumbPane() {
     selected,
     anchorId: anchor,
     nonce,
-    onToggle: toggle
+    onToggle: toggle,
+    onDragStart: handleDragStart,
+    onDragEnd: handleDragEnd
   }
 
   return (
@@ -104,14 +145,33 @@ export default function ThumbPane() {
       <div className="side-head">
         <span className="side-head-title">
           {view.kind === 'folder' && (
-            // Slot for Task 15's back-to-inbox navigation.
-            <button type="button" className="icon-btn" disabled title="返回（即将推出）">
+            <button
+              type="button"
+              className="icon-btn"
+              title="返回待分类（Esc）"
+              aria-label="返回待分类"
+              onClick={() => void switchView({ kind: 'inbox' })}
+            >
               <ChevronLeftIcon />
             </button>
           )}
           {headerTitle(view, folderName)}
         </span>
-        <span className="cnt">{photos.length}</span>
+        <span className="side-head-right">
+          {view.kind === 'trash' && (
+            // Placement: the trash view's own header, next to the count it acts
+            // on; the right-pane trash card stays a pure navigation/drop target.
+            <button
+              type="button"
+              className="tb-btn restore-btn"
+              disabled={selected.size === 0}
+              onClick={() => void restoreSelection()}
+            >
+              恢复
+            </button>
+          )}
+          <span className="cnt">{photos.length}</span>
+        </span>
       </div>
 
       {photos.length === 0 ? (

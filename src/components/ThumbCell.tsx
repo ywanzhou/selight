@@ -1,4 +1,4 @@
-import { type CSSProperties } from 'react'
+import { type CSSProperties, type DragEvent } from 'react'
 import type { PhotoRow } from '../../electron/shared/api'
 import { useMediaUrl } from '../hooks/useMediaUrl'
 import type { ToggleOptions } from '../state/selection'
@@ -12,6 +12,10 @@ export interface ThumbCellData {
   // memo even though the selected Set mutates in place.
   nonce: number
   onToggle: (id: number, options: ToggleOptions) => void
+  // HTML5 drag source: dragstart writes the current selection (or just the
+  // dragged photo) under the shared drop mime; dragend releases the ref.
+  onDragStart: (id: number, e: DragEvent<HTMLDivElement>) => void
+  onDragEnd: () => void
 }
 
 interface GridCellProps extends ThumbCellData {
@@ -46,6 +50,8 @@ function ThumbCell({ photo, isAnchor, isSelected }: {
           src={src}
           alt=""
           loading="lazy"
+          // The wrapper cell owns the drag; suppress the browser's native image drag.
+          draggable={false}
           // Missing or not-yet-built thumbs keep the gray placeholder instead of a broken-image glyph.
           onError={(e) => {
             e.currentTarget.style.visibility = 'hidden'
@@ -78,7 +84,9 @@ export default function GridCell({
   photos,
   selected,
   anchorId,
-  onToggle
+  onToggle,
+  onDragStart,
+  onDragEnd
 }: GridCellProps) {
   const photo = photos[rowIndex * 2 + columnIndex]
   if (photo === undefined) return null
@@ -88,6 +96,9 @@ export default function GridCell({
       className="thumb-cell"
       style={style}
       {...ariaAttributes}
+      draggable
+      onDragStart={(e) => onDragStart(photo.id, e)}
+      onDragEnd={onDragEnd}
       onClick={(e) =>
         onToggle(photo.id, {
           ctrl: e.ctrlKey || e.metaKey,

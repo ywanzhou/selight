@@ -332,11 +332,185 @@ button:disabled {
   color: var(--color-label);
 }
 
-.pane-placeholder {
-  margin: auto;
-  padding: 16px;
-  font-size: 12px;
+/* ---- right pane: folder card grid (mockup .cards/.fcard) ---- */
+.cards {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 12px 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-content: start;
+}
+
+.fcard {
+  border-radius: var(--radius-card);
+  background: var(--card-background);
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 12px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  cursor: default;
+}
+
+.fcard:hover {
+  background: #ffffff;
+}
+
+.fcard.active {
+  background: var(--color-blue);
+  border-color: var(--color-blue);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.35);
+}
+
+.fcard.active .fc-name,
+.fcard.active .fc-count {
+  color: #ffffff;
+}
+
+.fcard.drop {
+  outline: 2px dashed var(--color-blue);
+  outline-offset: 1px;
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.fc-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  /* Finder-style green from the approved mockup; no matching token exists. */
+  color: #5ac153;
+}
+
+.fc-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.fcard.active .fc-icon {
+  color: #ffffff;
+}
+
+.fc-name {
+  max-width: 100%;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fc-count {
+  font-size: 11px;
   color: var(--color-tertiary);
+}
+
+/* Trash keeps its red language when active instead of turning blue. */
+.fcard.trash {
+  grid-column: 1 / -1;
+  background: rgba(255, 59, 48, 0.06);
+}
+
+.fcard.trash .fc-icon {
+  color: var(--color-red);
+}
+
+.fcard.trash .fc-name {
+  color: #d70015;
+}
+
+.fcard.trash.active {
+  background: rgba(255, 59, 48, 0.14);
+  border-color: var(--color-red);
+  box-shadow: 0 2px 8px rgba(255, 59, 48, 0.25);
+}
+
+.fcard.trash.drop {
+  outline: 2px dashed var(--color-red);
+  background: rgba(255, 59, 48, 0.12);
+}
+
+.new-card {
+  border-radius: var(--radius-card);
+  border: 1.5px dashed rgba(0, 0, 0, 0.18);
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--color-tertiary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.new-card:hover {
+  border-color: var(--color-blue);
+  color: var(--color-blue);
+  background: rgba(0, 122, 255, 0.05);
+}
+
+.new-card svg {
+  width: 20px;
+  height: 20px;
+}
+
+.new-card.editing {
+  padding: 10px;
+  border-color: var(--color-blue);
+}
+
+.inline-name-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: var(--radius-control);
+  border: 0.5px solid rgba(0, 0, 0, 0.18);
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-label);
+  text-align: center;
+}
+
+/* ---- folder card context menu ---- */
+.context-menu {
+  position: fixed;
+  z-index: 110;
+  min-width: 140px;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  border: var(--hairline-strong);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: var(--frost-toolbar);
+  -webkit-backdrop-filter: var(--frost-toolbar);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.context-menu button {
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.context-menu button:hover {
+  background: var(--bg-control);
+}
+
+.context-menu button.danger {
+  color: var(--color-red);
 }
 
 /* ---- left thumbnail grid (mockup .thumbs/.thumb) ---- */
@@ -347,13 +521,20 @@ button:disabled {
   min-width: 0;
 }
 
+.side-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .side-head .cnt {
   font-weight: 500;
 }
 
-/* Disabled back-button slot keeps the header geometry stable until Task 15. */
-.side-head .icon-btn:disabled {
-  opacity: 0.35;
+.restore-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .pane-empty {
