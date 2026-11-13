@@ -20,6 +20,7 @@
     "electron/main.ts",
     "electron/preload.ts",
     "electron/db/**/*.ts",
+    "electron/domain/**/*.ts",
     "tests/**/*.ts"
   ]
 }
