@@ -13,6 +13,7 @@ import {
   recoveryImport,
   reducer,
   refresh,
+  switchView,
   type AppState,
   type ThunkDeps
 } from '../../src/state/store'
@@ -257,6 +258,33 @@ describe('interactive thunks', () => {
     const h = harness(api)
 
     await refresh(h.deps)
+    expect(listView).not.toHaveBeenCalled()
+  })
+
+  it('switchView re-pulls the target view and lands its view/photos in state', async () => {
+    const inboxPhoto = { id: 7 }
+    const listView = vi.fn(async (_batchId: number, view: { kind: string }) =>
+      view.kind === 'inbox' ? [inboxPhoto] : []
+    )
+    const countsFn = vi.fn(async () => zeroCounts)
+    const listFolders = vi.fn(async () => [])
+    const api = makeApi({ listView, counts: countsFn, listFolders })
+    const h = harness(api)
+    h.dispatch({ type: 'opened', state: opened })
+
+    await switchView(h.deps, { kind: 'inbox' })
+
+    expect(listView).toHaveBeenCalledWith(1, { kind: 'inbox' })
+    expect(h.state.view).toEqual({ kind: 'inbox' })
+    expect(h.state.photos).toEqual([inboxPhoto])
+  })
+
+  it('switchView is a no-op without an open batch', async () => {
+    const listView = vi.fn()
+    const api = makeApi({ listView })
+    const h = harness(api)
+
+    await switchView(h.deps, { kind: 'trash' })
     expect(listView).not.toHaveBeenCalled()
   })
 

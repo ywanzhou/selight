@@ -1,9 +1,28 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   createSelection,
+  neighborId,
   type SelectionModel,
   type ToggleOptions
 } from '../state/selection'
+
+export interface SelectionApi {
+  orderedIds: number[]
+  selected: Set<number>
+  anchor: number | null
+  /** Monotonic render-bump primitive; see SelectionModel.getNonce. */
+  nonce: number
+  toggle(id: number, options?: ToggleOptions): void
+  selectAll(): void
+  clear(): void
+  /** Move the single selection to the neighbor slot, clamped at the ends. */
+  navigate(dir: -1 | 1): void
+  /**
+   * Select this id once after the next view change (e.g. the photo that shifts
+   * into the anchor slot after assign/trash + refresh); null clears a pending pin.
+   */
+  pinSelection(id: number | null): void
+}
 
 // Thin React wrapper around the DOM-free pure model. A new orderedIds array
 // identity (view switch or refresh) recreates the model, so selection never
@@ -11,7 +30,7 @@ import {
 export function useSelection(
   orderedIds: number[],
   onChange?: (ids: number[]) => void
-) {
+): SelectionApi {
   const idsRef = useRef(orderedIds)
   const modelRef = useRef<SelectionModel | null>(null)
   if (modelRef.current === null || idsRef.current !== orderedIds) {
@@ -23,11 +42,20 @@ export function useSelection(
   const [, bump] = useReducer((n: number) => n + 1, 0)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const pendingPinRef = useRef<number | null>(null)
 
   // The render-phase recreation above clears selection; mirror that reset once
-  // committed so store consumers (PreviewPane, Task 14) see the empty selection.
+  // committed so store consumers see the empty selection — unless a pin was
+  // requested (post-classify landing), in which case select the pinned photo.
   useEffect(() => {
-    onChangeRef.current?.([])
+    const pinned = pendingPinRef.current
+    pendingPinRef.current = null
+    if (pinned !== null && orderedIds.includes(pinned)) {
+      model.toggle(pinned)
+      emit()
+    } else {
+      onChangeRef.current?.([])
+    }
   }, [orderedIds])
 
   const emit = useCallback(() => {
@@ -53,7 +81,23 @@ export function useSelection(
     emit()
   }, [model, emit])
 
+  const navigate = useCallback(
+    (dir: -1 | 1) => {
+      const nextId = neighborId(orderedIds, model.anchor, dir)
+      if (nextId !== null) {
+        model.toggle(nextId)
+        emit()
+      }
+    },
+    [model, emit, orderedIds]
+  )
+
+  const pinSelection = useCallback((id: number | null) => {
+    pendingPinRef.current = id
+  }, [])
+
   return {
+    orderedIds,
     selected: model.selected,
     anchor: model.anchor,
     // Primitive read after every bump() re-render; cellProps consumers pass it
@@ -61,6 +105,8 @@ export function useSelection(
     nonce: model.getNonce(),
     toggle,
     selectAll,
-    clear
+    clear,
+    navigate,
+    pinSelection
   }
 }

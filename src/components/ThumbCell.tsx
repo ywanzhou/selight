@@ -1,32 +1,8 @@
-import { useEffect, useState, type CSSProperties } from 'react'
-import type { MediaKind, PhotoRow } from '../../electron/shared/api'
+import { type CSSProperties } from 'react'
+import type { PhotoRow } from '../../electron/shared/api'
+import { useMediaUrl } from '../hooks/useMediaUrl'
 import type { ToggleOptions } from '../state/selection'
 import { CheckIcon, WarningIcon } from './icons'
-
-// mediaUrl is an IPC round trip; cells mount/unmount while scrolling, so cache
-// the resolved selight:// URL per photo+kind to avoid re-asking the main process.
-const urlCache = new Map<string, string>()
-
-function useMediaUrl(id: number, kind: MediaKind): string | undefined {
-  const key = `${kind}:${id}`
-  const [url, setUrl] = useState(() => urlCache.get(key))
-  useEffect(() => {
-    let cancelled = false
-    const cached = urlCache.get(key)
-    if (cached !== undefined) {
-      setUrl(cached)
-      return
-    }
-    void window.selight.mediaUrl(id, kind).then((resolved) => {
-      urlCache.set(key, resolved)
-      if (!cancelled) setUrl(resolved)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [id, kind, key])
-  return url
-}
 
 export interface ThumbCellData {
   photos: PhotoRow[]

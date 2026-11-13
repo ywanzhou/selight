@@ -1,18 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import Toolbar from './components/Toolbar'
 import ThumbPane from './components/ThumbPane'
+import PreviewPane from './components/PreviewPane'
 import { FolderIcon, PlusIcon } from './components/icons'
+import { useShortcuts } from './hooks/useShortcuts'
 import { AppStoreProvider, useAppStore } from './state/store'
-
-// Placeholder panes: real PreviewPane/FolderCards land in Tasks 14-15.
-// The shell geometry, frosted sidebars and hairline dividers are already final.
-function PreviewPane() {
-  return (
-    <main className="preview-pane">
-      <p className="pane-placeholder">预览即将上线</p>
-    </main>
-  )
-}
+import { SelectionProvider } from './state/selectionContext'
 
 function FolderCardsPane() {
   return (
@@ -120,6 +113,19 @@ function RecoveryDialog() {
   )
 }
 
+// Mounted inside SelectionProvider: the global shortcut hook mutates the same
+// selection model the thumbnail grid and preview read.
+function Workspace() {
+  useShortcuts()
+  return (
+    <div className="app-body">
+      <ThumbPane />
+      <PreviewPane />
+      <FolderCardsPane />
+    </div>
+  )
+}
+
 function Shell() {
   const { state } = useAppStore()
 
@@ -131,11 +137,9 @@ function Shell() {
       ) : !state.loading && state.batchId === null ? (
         <EmptyState />
       ) : (
-        <div className="app-body">
-          <ThumbPane />
-          <PreviewPane />
-          <FolderCardsPane />
-        </div>
+        <SelectionProvider>
+          <Workspace />
+        </SelectionProvider>
       )}
       <RecoveryDialog />
     </div>

@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useRef, type KeyboardEvent } from 'react'
+import { useCallback, useRef } from 'react'
 import { Grid } from 'react-window'
 import type { PhotoRow, View } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
-import { useSelection } from '../hooks/useSelection'
+import { useSelectionContext } from '../state/selectionContext'
 import GridCell, { type ThumbCellData } from './ThumbCell'
 import { ChevronLeftIcon } from './icons'
 
@@ -43,12 +43,10 @@ function emptyText(view: View): string {
 }
 
 export default function ThumbPane() {
-  const { state, setSelection } = useAppStore()
+  const { state } = useAppStore()
   const { batchId, view, photos, folders } = state
 
-  const orderedIds = useMemo(() => photos.map((p) => p.id), [photos])
-  const selection = useSelection(orderedIds, setSelection)
-  const { selected, anchor, nonce, toggle, selectAll } = selection
+  const { selected, anchor, nonce, toggle } = useSelectionContext()
 
   // Remount on batch/view switch: resets scroll position and prevents recycled
   // slots from briefly showing the previous view's photos at the same indices.
@@ -83,16 +81,6 @@ export default function ThumbPane() {
       void window.selight.markSelection(ids).catch(() => undefined)
     },
     [photos]
-  )
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        e.preventDefault()
-        selectAll()
-      }
-    },
-    [selectAll]
   )
 
   const folderName =
@@ -139,7 +127,6 @@ export default function ThumbPane() {
             rowCount={Math.ceil(photos.length / COLUMN_COUNT)}
             rowHeight={ROW_H}
             onCellsRendered={handleCellsRendered}
-            onKeyDown={handleKeyDown}
             tabIndex={0}
             defaultWidth={200 - PADDING_X * 2}
             defaultHeight={600}

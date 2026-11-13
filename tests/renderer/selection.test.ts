@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createSelection } from '../../src/state/selection'
+import {
+  createSelection,
+  neighborId,
+  nextSelectionId
+} from '../../src/state/selection'
 
 // The selection model is plain TypeScript with no React/DOM imports, so the
 // whole multi-select contract runs under bare Node like the store thunks.
@@ -179,5 +183,56 @@ describe('createSelection nonce', () => {
     sel.selectAll()
     sel.selectAll()
     expect(sel.getNonce()).toBe(3)
+  })
+})
+
+describe('neighborId', () => {
+  it('walks one slot in the requested direction from the anchor', () => {
+    expect(neighborId(IDS, 33, 1)).toBe(44)
+    expect(neighborId(IDS, 33, -1)).toBe(22)
+  })
+
+  it('clamps at both ends instead of wrapping', () => {
+    expect(neighborId(IDS, 11, -1)).toBe(11)
+    expect(neighborId(IDS, 88, 1)).toBe(88)
+  })
+
+  it('picks the first photo going right and the last going left without an anchor', () => {
+    expect(neighborId(IDS, null, 1)).toBe(11)
+    expect(neighborId(IDS, null, -1)).toBe(88)
+  })
+
+  it('returns null on an empty view', () => {
+    expect(neighborId([], null, 1)).toBeNull()
+    expect(neighborId([], 5, -1)).toBeNull()
+  })
+
+  it('treats a stale anchor as no anchor', () => {
+    expect(neighborId(IDS, 999, 1)).toBe(11)
+  })
+})
+
+describe('nextSelectionId', () => {
+  it('lands on the photo that shifted into the anchor slot after a single-photo action', () => {
+    // Anchor 33 at index 2 leaves; 44 shifts into slot 2.
+    expect(nextSelectionId(IDS, [33], 33)).toBe(44)
+  })
+
+  it('falls back to the last remaining photo when acting on the tail', () => {
+    expect(nextSelectionId(IDS, [88], 88)).toBe(77)
+  })
+
+  it('returns null when every photo leaves the view', () => {
+    expect(nextSelectionId(IDS, IDS, 33)).toBeNull()
+  })
+
+  it('keeps a stable position when other slots are removed too', () => {
+    // Anchor 55 (index 4); removing 11 and 55 leaves [22,33,44,66,77,88],
+    // slot 4 is now 77.
+    expect(nextSelectionId(IDS, [11, 55], 55)).toBe(77)
+  })
+
+  it('defaults to the first remaining photo when the anchor is missing', () => {
+    expect(nextSelectionId(IDS, [33], null)).toBe(11)
   })
 })

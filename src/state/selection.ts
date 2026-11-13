@@ -18,6 +18,41 @@ export interface SelectionModel {
   clear(): void
 }
 
+/** Neighbor the selection should move to from anchorId; clamps at both ends. */
+export function neighborId(
+  orderedIds: readonly number[],
+  anchorId: number | null,
+  dir: -1 | 1
+): number | null {
+  if (orderedIds.length === 0) return null
+  const index = anchorId === null ? -1 : orderedIds.indexOf(anchorId)
+  if (index === -1) {
+    // No anchor (empty selection or a stale one after a view switch): enter the
+    // list from the nearest end instead of jumping to a middle slot.
+    return dir === 1 ? orderedIds[0] : orderedIds[orderedIds.length - 1]
+  }
+  const next = Math.min(orderedIds.length - 1, Math.max(0, index + dir))
+  return orderedIds[next]
+}
+
+/**
+ * After actedIds leave the view, pick the remaining photo that occupies the
+ * anchor's old slot, or the last remaining photo when the tail was acted on.
+ * Returns null when the view is left empty.
+ */
+export function nextSelectionId(
+  orderedIds: readonly number[],
+  actedIds: readonly number[],
+  anchorId: number | null
+): number | null {
+  const acted = new Set(actedIds)
+  const remaining = orderedIds.filter((id) => !acted.has(id))
+  if (remaining.length === 0) return null
+  const anchorIndex = anchorId === null ? -1 : orderedIds.indexOf(anchorId)
+  if (anchorIndex === -1) return remaining[0]
+  return remaining[Math.min(anchorIndex, remaining.length - 1)]
+}
+
 export function createSelection(orderedIds: readonly number[]): SelectionModel {
   const selected = new Set<number>()
   let anchor: number | null = null

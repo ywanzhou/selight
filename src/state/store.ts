@@ -81,7 +81,7 @@ export function reducer(state: AppState, action: Action): AppState {
         counts: action.counts
       }
     case 'selected':
-      // Mirror of the selection model owned by useSelection in ThumbPane.
+      // Mirror of the selection model owned by SelectionProvider/useSelection.
       return { ...state, selection: action.ids }
     case 'loading':
       return { ...state, loading: action.loading }
@@ -105,9 +105,9 @@ export interface ThunkDeps {
   dispatch(action: Action): void
 }
 
-/** Re-pull listView/counts/listFolders for the current batch+view. */
-export async function refresh(deps: ThunkDeps): Promise<void> {
-  const { batchId, view } = deps.getState()
+/** Re-pull listView/counts/listFolders for a batch+view and commit the view switch. */
+export async function switchView(deps: ThunkDeps, view: View): Promise<void> {
+  const { batchId } = deps.getState()
   if (batchId === null) return
   const [photos, counts, folders] = await Promise.all([
     deps.api.listView(batchId, view),
@@ -115,6 +115,11 @@ export async function refresh(deps: ThunkDeps): Promise<void> {
     deps.api.listFolders(batchId)
   ])
   deps.dispatch({ type: 'refreshed', view, photos, counts, folders })
+}
+
+/** Re-pull listView/counts/listFolders for the current batch+view. */
+export function refresh(deps: ThunkDeps): Promise<void> {
+  return switchView(deps, deps.getState().view)
 }
 
 export async function openBatch(deps: ThunkDeps, batchId: number): Promise<void> {
@@ -179,6 +184,7 @@ export interface AppStore {
   setSelection(ids: number[]): void
   boot(): Promise<void>
   refresh(): Promise<void>
+  switchView(view: View): Promise<void>
   openBatch(batchId: number): Promise<void>
   createBatch(): Promise<void>
   importDirectory(): Promise<ImportResult | null>
@@ -219,6 +225,7 @@ export function AppStoreProvider({
     setSelection: (ids) => dispatch({ type: 'selected', ids }),
     boot: () => boot(deps),
     refresh: () => refresh(deps),
+    switchView: (view) => switchView(deps, view),
     openBatch: (batchId) => openBatch(deps, batchId),
     createBatch: () => createBatch(deps),
     importDirectory: () => importDirectory(deps),
