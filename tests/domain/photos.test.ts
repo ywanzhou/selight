@@ -205,6 +205,26 @@ describe('photo domain module', () => {
     expect(photoCount(db)).toBe(1)
   })
 
+  it('refreshes metadata when size changes even though mtime is unchanged (Ruling 10)', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const input = makeInput(db, batch.id, 'E:/photos/a.jpg')
+    const first = upsertPhoto(db, input)
+
+    nextTick()
+    const refreshed = upsertPhoto(db, { ...input, sizeBytes: 4096 })
+
+    expect(refreshed.created).toBe(false)
+    expect(refreshed.row.id).toBe(first.row.id)
+    expect(refreshed.row.sizeBytes).toBe(4096)
+    expect(refreshed.row.mtime).toBe(input.mtime)
+    expect(refreshed.row.updatedAt).toBeGreaterThan(first.row.updatedAt)
+
+    // Same mtime and size stays a no-op: updatedAt must not move.
+    const noop = upsertPhoto(db, { ...input, sizeBytes: 4096 })
+    expect(noop.row.updatedAt).toBe(refreshed.row.updatedAt)
+  })
+
   it('listPhotos filters each view and orders rows by absPath', () => {
     const db = tempDb()
     const batch = createBatch(db)

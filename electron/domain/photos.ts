@@ -108,7 +108,8 @@ export function upsertPhoto(
            mtime = excluded.mtime,
            orientation = excluded.orientation,
            updated_at = ?
-         WHERE photos.mtime IS NOT excluded.mtime`
+         WHERE photos.mtime IS NOT excluded.mtime
+            OR photos.size_bytes IS NOT excluded.size_bytes`
       )
       .run(
         input.batchId,
