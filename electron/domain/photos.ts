@@ -122,8 +122,11 @@ export function upsertPhoto(
         Date.now()
       )
 
-    // On conflict SQLite returns the conflicting row's rowid, so this id is valid on both branches.
-    return { row: getPhoto(db, Number(info.lastInsertRowid)), created: !existing }
+    // On conflict last_insert_rowid is unreliable: a skipped WHERE leaves it untouched and an
+    // applied UPDATE may still return a rowid from an earlier INSERT on this connection.
+    // Reuse the row looked up above; lastInsertRowid is only valid for the fresh-INSERT branch.
+    const id = existing ? existing.id : Number(info.lastInsertRowid)
+    return { row: getPhoto(db, id), created: !existing }
   })()
 }
 

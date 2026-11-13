@@ -126,6 +126,36 @@ describe('photo domain module', () => {
     expect(photoCount(db)).toBe(1)
   })
 
+  it('re-upsert resolves to the original row when last_insert_rowid has moved on', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const input = makeInput(db, batch.id, 'E:/photos/a.jpg')
+    const first = upsertPhoto(db, input)
+    expect(first.created).toBe(true)
+
+    // A rescan inserts sources before re-upserting photos, moving the connection's
+    // last_insert_rowid away from the photo's rowid (source ids 2..4 vs photo id 1).
+    addSource(db, batch.id, 'E:/photos/extra-1.jpg')
+    addSource(db, batch.id, 'E:/photos/extra-2.jpg')
+    addSource(db, batch.id, 'E:/photos/extra-3.jpg')
+
+    // No-op conflict: unchanged mtime makes the ON CONFLICT WHERE skip the UPDATE,
+    // so last_insert_rowid is guaranteed to stay at the stale sources rowid.
+    const noop = upsertPhoto(db, input)
+    expect(noop.created).toBe(false)
+    expect(noop.row.id).toBe(first.row.id)
+    expect(noop.row.absPath).toBe(first.row.absPath)
+
+    // The update conflict path (mtime changed) must also resolve to the same row.
+    const updated = upsertPhoto(db, { ...input, mtime: input.mtime + 1000 })
+    expect(updated.created).toBe(false)
+    expect(updated.row.id).toBe(first.row.id)
+    expect(updated.row.absPath).toBe(first.row.absPath)
+    expect(updated.row.mtime).toBe(input.mtime + 1000)
+
+    expect(photoCount(db)).toBe(1)
+  })
+
   it('treats the same absPath in a different batch as a separate photo', () => {
     const db = tempDb()
     const batchA = createBatch(db, 'a')
