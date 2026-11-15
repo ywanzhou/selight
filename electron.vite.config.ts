@@ -10,7 +10,10 @@ export default defineConfig({
           index: resolve('electron/main.ts'),
           // Committed Electron smoke harness for the Blink webp pipeline; run via
           // tests/smoke/electron-blink-harness.cjs after `npm run build`.
-          harness: resolve('tests/smoke/blink-harness.entry.ts')
+          harness: resolve('tests/smoke/blink-harness.entry.ts'),
+          // Task 19 real-sample RAW/orientation harness; run via
+          // tests/smoke/electron-raw-samples-harness.cjs after `npm run build`.
+          'raw-harness': resolve('tests/smoke/raw-samples-harness.entry.ts')
         }
       }
     }
