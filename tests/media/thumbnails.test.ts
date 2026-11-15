@@ -12,14 +12,24 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Import after the mock is registered.
+// The Blink helper is an Electron shell: node tests exercise its contract via the pure
+// blinkProtocol suite and the committed Electron harness; here its boundary is mocked.
+vi.mock('../../electron/media/blinkThumbnail', () => ({
+  decodeWebpThumbnail: vi.fn(),
+  configureBlinkThumbnail: vi.fn(),
+  closeBlinkHelper: vi.fn()
+}))
+
+// Import after the mocks are registered.
 import { nativeImage } from 'electron'
+import { decodeWebpThumbnail } from '../../electron/media/blinkThumbnail'
 import { ensureThumbnail, type ThumbnailPhoto } from '../../electron/media/thumbnails'
 import { RawPreviewError } from '../../electron/media/rawPreview'
 import { tinyJpeg } from './fixtures'
 
 const dirs: string[] = []
 const mocked = vi.mocked(nativeImage)
+const mockedBlink = vi.mocked(decodeWebpThumbnail)
 
 function makeCacheDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-thumb-'))
@@ -132,6 +142,36 @@ describe('ensureThumbnail placeholder sidecar', () => {
     const second = await ensureThumbnail(p, cacheDir)
     expect(second).toEqual({ path: out, placeholder: false })
     expect(mocked.createThumbnailFromPath).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes webp through the Blink helper and writes its JPEG without touching nativeImage', async () => {
+    const cacheDir = makeCacheDir()
+    const jpeg = tinyJpeg()
+    mockedBlink.mockResolvedValue(jpeg)
+    const p = photo({ ext: '.webp', absPath: path.join(os.tmpdir(), 'selight-source.webp') })
+    const out = path.join(cacheDir, '42.jpg')
+
+    const result = await ensureThumbnail(p, cacheDir)
+
+    expect(result).toEqual({ path: out, placeholder: false })
+    expect(mockedBlink).toHaveBeenCalledWith(p.absPath)
+    expect(fs.readFileSync(out)).toEqual(jpeg)
+    expect(fs.existsSync(`${out}.placeholder`)).toBe(false)
+    expect(mocked.createThumbnailFromPath).not.toHaveBeenCalled()
+    expect(mocked.createFromBuffer).not.toHaveBeenCalled()
+  })
+
+  it('degrades a Blink webp failure to the placeholder with sidecar, keeping the queue contract', async () => {
+    const cacheDir = makeCacheDir()
+    mockedBlink.mockRejectedValue(new Error('helper unavailable'))
+    const p = photo({ ext: '.webp', absPath: path.join(os.tmpdir(), 'selight-source.webp') })
+    const out = path.join(cacheDir, '42.jpg')
+
+    const result = await ensureThumbnail(p, cacheDir)
+
+    expect(result).toEqual({ path: out, placeholder: true })
+    expect(fs.existsSync(`${out}.placeholder`)).toBe(true)
+    expect(mocked.createThumbnailFromPath).not.toHaveBeenCalled()
   })
 
   it('removes a stale sidecar when a later generation succeeds', async () => {

@@ -6,6 +6,7 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from './db/schema'
 import { ExiftoolReader } from './media/rawPreview'
 import { createThumbnailQueue } from './media/thumbnails'
+import { closeBlinkHelper, configureBlinkThumbnail } from './media/blinkThumbnail'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -44,6 +45,13 @@ function createWindow(): BrowserWindow {
     win.show()
   })
 
+  win.on('closed', () => {
+    mainWindow = null
+    // The hidden Blink helper is not a user window: tear it down so window-all-closed
+    // can still quit the app once it is the only window left. It recreates lazily.
+    if (process.platform !== 'darwin') closeBlinkHelper()
+  })
+
   // HMR URL in development, built file in production.
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -64,7 +72,26 @@ app.whenReady().then(() => {
   fs.mkdirSync(previewDir, { recursive: true })
   const roots = { thumbDir, previewDir }
 
-  registerMediaProtocol(db, roots)
+  const rendererRoot = path.join(__dirname, '../renderer')
+  registerMediaProtocol(db, roots, rendererRoot)
+
+  // Ruling 18: the Blink helper only decodes abs_paths registered to a present photo.
+  // A live lookup (not a snapshot) stays correct as imports add rows later.
+  const devRendererUrl = process.env['ELECTRON_RENDERER_URL']
+  configureBlinkThumbnail({
+    lookupPhoto: (absPath: string) => {
+      const row = openedDb
+        .prepare('SELECT id, missing FROM photos WHERE abs_path = ?')
+        .get(absPath) as { id: number; missing: number } | undefined
+      return row && row.missing === 0 ? { id: row.id } : null
+    },
+    preloadPath: path.join(__dirname, '../preload/helper.js'),
+    // Served from the selight scheme so the page is a CORS-capable origin; the dev
+    // server is http(s), which is CORS-capable directly.
+    helperPage: devRendererUrl
+      ? `${devRendererUrl}/helper.html`
+      : 'selight://helper/helper.html'
+  })
 
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(db, roots, exifReader)
@@ -231,6 +258,8 @@ app.on('will-quit', (event) => {
       sessionStore?.flush()
       // Stop starting new thumbnail work; in-flight tasks are allowed to finish.
       thumbQueue?.stop()
+      // Reject any helper request still waiting and destroy the hidden renderer.
+      closeBlinkHelper()
       try {
         db?.close()
       } catch (err) {

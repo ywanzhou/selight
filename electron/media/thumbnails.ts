@@ -7,6 +7,7 @@ import { ExiftoolReader } from './rawPreview'
 import { rotateJpegBuffer } from './orientation'
 import { RAW_EXTENSIONS } from './formats'
 import { MediaQueue } from './queue'
+import { decodeWebpThumbnail } from './blinkThumbnail'
 
 const THUMB_WIDTH = 320
 const JPEG_QUALITY = 85
@@ -33,6 +34,10 @@ export interface ThumbnailResult {
 // is still a valid image the renderer can display.
 const PLACEHOLDER_JPEG_BASE64 =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAf/AABEIAAQACAMBEQACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AOC+Jz6N8IPjR+1t8NvhP4V8P/Df4f8Awm+J37HHj34ZeC/CC6vpXhjwL4q+M/w3+BGveOLzw1oo1eTT9N0b+0vjF8SX8K+CooP+ED8CWviVNM8FeF9B0zw/4Vs9C+w8M+Ecu8V8N4DS4mqclXxGxfFv0eeLsTg8p4YxGMzTgLijwy458TctrSxue5DnWLp8QeHviB4Y8O8X+G+YQrLC8L59ic7x8MvxdXNarhpwBhocJ/TRyvKsjf1XL+KuH/EHLs/w0qdCtHMMty3hfMuJaWA56tGVTB0q+dcP5JisZWwE8LjcTTy2lgZ4r+z6+NwuK//Z'
+
+// Exported so the Electron smoke harness can prove a real thumbnail is not the
+// placeholder constant byte-for-byte.
+export const PLACEHOLDER_JPEG_BYTES = Buffer.from(PLACEHOLDER_JPEG_BASE64, 'base64')
 
 // Write via a sibling .tmp then rename so a crash cannot leave a truncated
 // thumbnail that cache-hits forever.
@@ -73,7 +78,7 @@ async function fallbackPlaceholder(
   cause: unknown
 ): Promise<ThumbnailResult> {
   console.error(`[selight] thumbnail generation failed for photo ${photoId}`, cause)
-  await atomicWrite(out, Buffer.from(PLACEHOLDER_JPEG_BASE64, 'base64'))
+  await atomicWrite(out, PLACEHOLDER_JPEG_BYTES)
   await writePlaceholderMarker(out)
   return { path: out, placeholder: true }
 }
@@ -97,6 +102,17 @@ export async function ensureThumbnail(
 
   try {
     const ext = photo.ext.toLowerCase()
+
+    if (ext === '.webp') {
+      // Electron 44 nativeImage cannot decode webp (corpus 20/20 failures): route webp
+      // through the hidden Blink helper. It already returns a width-320 JPEG, so write
+      // the bytes directly instead of re-encoding through nativeImage.
+      const jpeg = await decodeWebpThumbnail(photo.absPath)
+      await atomicWrite(out, jpeg)
+      await removePlaceholderMarker(out)
+      return { path: out, placeholder: false }
+    }
+
     let image: NativeImage
 
     if (RAW_EXTENSIONS.has(ext)) {

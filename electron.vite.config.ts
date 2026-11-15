@@ -7,7 +7,10 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('electron/main.ts')
+          index: resolve('electron/main.ts'),
+          // Committed Electron smoke harness for the Blink webp pipeline; run via
+          // tests/smoke/electron-blink-harness.cjs after `npm run build`.
+          harness: resolve('tests/smoke/blink-harness.entry.ts')
         }
       }
     }
@@ -16,7 +19,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('electron/preload.ts')
+          index: resolve('electron/preload.ts'),
+          helper: resolve('electron/helper-preload.ts')
         }
       }
     }
@@ -26,7 +30,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/index.html')
+          index: resolve('src/index.html'),
+          helper: resolve('src/helper.html')
         }
       }
     },

@@ -16,7 +16,15 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { nativeImage } from 'electron'
+// Ruling 18: webp now decodes in the hidden Blink helper, not nativeImage. The real
+// decoder is proven by tests/smoke/electron-blink-harness.cjs against the live corpus.
+vi.mock('../../electron/media/blinkThumbnail', () => ({
+  decodeWebpThumbnail: vi.fn(),
+  configureBlinkThumbnail: vi.fn(),
+  closeBlinkHelper: vi.fn()
+}))
+
+import { decodeWebpThumbnail } from '../../electron/media/blinkThumbnail'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { createFolder, listFolders } from '../../electron/domain/folders'
@@ -313,11 +321,8 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
 
   // ---------------------------------------------------------------- 3. thumbnails
   slowIt('drains the thumbnail queue over 20 real webp rows with valid JPEG cache files and sidecar contract', async () => {
-    const mocked = vi.mocked(nativeImage.createThumbnailFromPath)
-    mocked.mockResolvedValue({
-      isEmpty: () => false,
-      resize: () => ({ isEmpty: () => false, toJPEG: () => tinyJpeg() })
-    } as never)
+    const mockedBlink = vi.mocked(decodeWebpThumbnail)
+    mockedBlink.mockResolvedValue(tinyJpeg())
 
     const webpRows = db
       .prepare(
@@ -339,9 +344,9 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
 
     await drain(sample.map((p) => p.id))
 
-    expect(mocked).toHaveBeenCalledTimes(20)
-    // The real corpus path reached the electron boundary untouched and existing on disk.
-    for (const call of mocked.mock.calls) {
+    expect(mockedBlink).toHaveBeenCalledTimes(20)
+    // The real corpus path reached the Blink boundary untouched and existing on disk.
+    for (const call of mockedBlink.mock.calls) {
       const source = call[0] as string
       expect(fs.existsSync(source)).toBe(true)
       expect(source.toLowerCase().endsWith('.webp')).toBe(true)
@@ -356,9 +361,9 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
       expect(fs.existsSync(`${file}.placeholder`)).toBe(false)
     }
 
-    // Second drain: disk cache hits, the electron decoder must not run again.
+    // Second drain: disk cache hits, the Blink decoder must not run again.
     await drain(sample.map((p) => p.id))
-    expect(mocked).toHaveBeenCalledTimes(20)
+    expect(mockedBlink).toHaveBeenCalledTimes(20)
 
     // Placeholder sidecar for a missing photo: decoder never runs, marker persists.
     const missingPhoto = webpRows.find((p) => !sample.some((s) => s.id === p.id))!
@@ -375,7 +380,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     expect(fs.readFileSync(missingFile).subarray(0, 3)).toEqual(
       Buffer.from([0xff, 0xd8, 0xff])
     )
-    expect(mocked).toHaveBeenCalledTimes(20)
+    expect(mockedBlink).toHaveBeenCalledTimes(20)
     db.prepare('UPDATE photos SET missing = 0 WHERE id = ?').run(missingPhoto.id)
 
     // Decode failure writes the sidecar; a later successful generation clears it.
@@ -383,7 +388,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
       (p) => !sample.some((s) => s.id === p.id) && p.id !== missingPhoto.id
     )!
     const failFile = path.join(thumbDir, `${failPhoto.id}.jpg`)
-    mocked.mockRejectedValueOnce(new Error('simulated decode boom'))
+    mockedBlink.mockRejectedValueOnce(new Error('simulated decode boom'))
     const failed = await ensureThumbnail(failPhoto, thumbDir)
     expect(failed.placeholder).toBe(true)
     expect(fs.existsSync(`${failFile}.placeholder`)).toBe(true)
@@ -391,6 +396,8 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     fs.rmSync(`${failFile}.placeholder`, { force: true })
     const recovered = await ensureThumbnail(failPhoto, thumbDir)
     expect(recovered.placeholder).toBe(false)
+    // 20 drained + one failing attempt + one successful recovery attempt.
+    expect(mockedBlink).toHaveBeenCalledTimes(22)
     expect(fs.existsSync(`${failFile}.placeholder`)).toBe(false)
     expect(fs.readFileSync(failFile).subarray(0, 3)).toEqual(
       Buffer.from([0xff, 0xd8, 0xff])
@@ -459,6 +466,8 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
         )}ms`
     )
     expect(percentile(totals, 0.95)).toBeGreaterThan(0)
+    // T18 review Minor 2: loose anti-regression ceiling, wide enough never to flap CI.
+    expect(percentile(totals, 0.95)).toBeLessThan(250)
   })
 
   // ------------------------------------------------------- 5. restart persistence

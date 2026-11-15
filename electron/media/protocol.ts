@@ -1,37 +1,68 @@
 import { net, protocol } from 'electron'
+import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Database } from 'better-sqlite3'
-import { resolveMediaPath, type MediaRoots } from './resolve'
+import { isInside, resolveMediaPath, type MediaRoots } from './resolve'
 
 // registerSchemesAsPrivileged must run before app ready, so importing this module
-// from main.ts performs the registration as a load-time side effect.
+// from main.ts performs the registration as a load-time side effect. corsEnabled lets
+// the helper page served from selight://helper fetch selight://photo cross-origin:
+// Chromium refuses CORS entirely from file:// origins.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'selight',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
   }
 ])
 
 // Thin Electron shell: all authorization lives in the pure resolveMediaPath so it
-// can be unit-tested without Electron. URLs are selight://thumb/<id> and
-// selight://photo/<id> (the host is the kind, thanks to the standard scheme).
-export function registerMediaProtocol(db: Database, roots: MediaRoots): void {
-  protocol.handle('selight', (request) => {
+// can be unit-tested without Electron. URLs are selight://thumb/<id>,
+// selight://photo/<id> and selight://helper/<built-asset> (the host is the kind,
+// thanks to the standard scheme).
+export function registerMediaProtocol(
+  db: Database,
+  roots: MediaRoots,
+  rendererRoot: string
+): void {
+  const builtRoot = path.resolve(rendererRoot)
+  protocol.handle('selight', async (request) => {
     try {
       const url = new URL(request.url)
-      if (url.hostname !== 'thumb' && url.hostname !== 'photo') {
+
+      let file: string | null
+      if (url.hostname === 'helper') {
+        // Fixed set of trusted build outputs only: the candidate must stay inside
+        // rendererRoot; no caller-supplied path ever escapes that directory.
+        const candidate = path.resolve(
+          builtRoot,
+          decodeURIComponent(url.pathname.slice(1))
+        )
+        file = isInside(builtRoot, candidate) ? candidate : null
+      } else if (url.hostname === 'thumb' || url.hostname === 'photo') {
+        file = resolveMediaPath(
+          db,
+          roots,
+          url.hostname,
+          decodeURIComponent(url.pathname.slice(1))
+        )
+      } else {
         return new Response('Forbidden', { status: 403 })
       }
-
-      const file = resolveMediaPath(
-        db,
-        roots,
-        url.hostname,
-        decodeURIComponent(url.pathname.slice(1))
-      )
       if (file === null) return new Response('Forbidden', { status: 403 })
 
-      return net.fetch(pathToFileURL(file).href)
+      const served = await net.fetch(pathToFileURL(file).href)
+      // The helper page and photo route are different selight hosts (and dev uses an
+      // http origin); allow the cross-origin fetch while the checks above stay the
+      // sole authorization rule.
+      const headers = new Headers(served.headers)
+      headers.set('Access-Control-Allow-Origin', '*')
+      return new Response(served.body, { status: served.status, headers })
     } catch {
       // Malformed URL or undecodable percent sequence: deny instead of crashing the handler.
       return new Response('Forbidden', { status: 403 })

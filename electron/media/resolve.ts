@@ -29,7 +29,7 @@ function parseId(photoId: number | string): number | null {
 
 // True when candidate is root itself or a path beneath it; a '..' escape or an
 // absolute different drive resolves to a path.relative() starting with '..'.
-function isInside(root: string, candidate: string): boolean {
+export function isInside(root: string, candidate: string): boolean {
   const rel = path.relative(root, candidate)
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
