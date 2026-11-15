@@ -9,9 +9,9 @@ import GridCell, { type ThumbCellData } from './ThumbCell'
 import { ChevronLeftIcon } from './icons'
 
 // Two columns, 10px gaps, 3:2 thumbs. The cell width is measured from the
-// .thumbs-wrap content box at runtime instead of deriving from the 200px
-// sidebar token, so the Windows classic scrollbar can never squeeze the grid
-// into horizontal overflow. FALLBACK_CELL_W matches the old fixed first paint.
+// inner react-window Grid's clientWidth at runtime instead of deriving from
+// the 200px sidebar token, so the Windows classic scrollbar can never squeeze
+// the grid into horizontal overflow. FALLBACK_CELL_W matches the old fixed first paint.
 const COLUMN_COUNT = 2
 const GAP = 10
 const FALLBACK_CELL_W = 83

@@ -1,6 +1,6 @@
 // DOM-free two-column grid geometry, unit-tested under bare Node. The measured
-// .thumbs-wrap content width (clientWidth minus its horizontal padding) is the
-// input: two equal cells plus one gap must always fit it.
+// inner Grid clientWidth is the input: two equal cells plus one gap must
+// always fit it.
 
 /**
  * Width of one thumbnail cell for a two-column grid with a single inter-column

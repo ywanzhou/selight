@@ -134,17 +134,18 @@ export function importScanned(
     }
 
     // Ruling 9: an unchanged upsert is a no-op and cannot clear missing, so explicitly reset
-    // the flag for every in-batch row present in this scan before marking the absent ones.
+    // the flag for rows present in this scan before marking the absent ones. Reset and mark
+    // are both scoped to this source, so other roots imported into the batch are untouched.
     for (let i = 0; i < presentPaths.length; i += RESET_CHUNK) {
       const slice = presentPaths.slice(i, i + RESET_CHUNK)
       db.prepare(
         `UPDATE photos SET missing = 0
-         WHERE batch_id = ? AND missing = 1
+         WHERE batch_id = ? AND source_id = ? AND missing = 1
            AND abs_path IN (${slice.map(() => '?').join(', ')})`
-      ).run(batchId, ...slice)
+      ).run(batchId, sourceId, ...slice)
     }
 
-    const missing = markMissing(db, batchId, new Set(presentPaths))
+    const missing = markMissing(db, batchId, new Set(presentPaths), sourceId)
     return { added, updated, missing }
   })()
 }

@@ -172,14 +172,23 @@ const MARK_MISSING_CHUNK = 500
 export function markMissing(
   db: Database,
   batchId: number,
-  existingPaths: Set<string>
+  existingPaths: Set<string>,
+  sourceId?: number
 ): number {
   // NOT IN cannot be split across statements: a present row whose path sits in another
   // chunk would satisfy "NOT IN this chunk" and get wrongly flagged. Membership is
   // therefore tested against the JS set, and only the id UPDATE is chunked (Ruling: 500).
+  // A sourceId scopes the work to one source: a batch can hold several imported roots,
+  // and rescanning one root must never flag rows belonging to the other roots.
   const rows = db
-    .prepare('SELECT id, abs_path FROM photos WHERE batch_id = ? AND missing = 0')
-    .all(batchId) as { id: number; abs_path: string }[]
+    .prepare(
+      `SELECT id, abs_path FROM photos
+       WHERE batch_id = ? AND missing = 0
+         ${sourceId === undefined ? '' : 'AND source_id = ?'}`
+    )
+    .all(
+      ...(sourceId === undefined ? [batchId] : [batchId, sourceId])
+    ) as { id: number; abs_path: string }[]
   const absentIds = rows.filter((row) => !existingPaths.has(row.abs_path)).map((row) => row.id)
 
   let changed = 0

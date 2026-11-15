@@ -337,4 +337,34 @@ describe('photo domain module', () => {
     // An empty present set then flags the 50 that remained.
     expect(markMissing(db, batch.id, new Set())).toBe(50)
   })
+
+  it('markMissing with a sourceId only flags rows of that source; without it stays batch-wide', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const sourceA = addSource(db, batch.id, 'E:/a')
+    const sourceB = addSource(db, batch.id, 'E:/b')
+    const a1 = upsertPhoto(
+      db,
+      makeInput(db, batch.id, 'E:/a/1.jpg', { sourceId: sourceA })
+    ).row
+    const b1 = upsertPhoto(
+      db,
+      makeInput(db, batch.id, 'E:/b/1.jpg', { sourceId: sourceB })
+    ).row
+
+    // Empty present set but scoped to B: B's absent row is flagged, A's is untouched.
+    expect(markMissing(db, batch.id, new Set(), sourceB)).toBe(1)
+    const reloaded = listPhotos(db, batch.id, { kind: 'inbox' })
+    expect(reloaded.find((r) => r.id === a1.id)?.missing).toBe(0)
+    expect(reloaded.find((r) => r.id === b1.id)?.missing).toBe(1)
+
+    // Re-running the scoped call is idempotent and never reaches source A.
+    expect(markMissing(db, batch.id, new Set(), sourceB)).toBe(0)
+
+    // Omitting sourceId preserves the original whole-batch semantics.
+    expect(markMissing(db, batch.id, new Set())).toBe(1)
+    expect(
+      listPhotos(db, batch.id, { kind: 'inbox' }).every((r) => r.missing === 1)
+    ).toBe(true)
+  })
 })

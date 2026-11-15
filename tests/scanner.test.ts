@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import { openDatabase } from '../electron/db/schema'
 import { createBatch } from '../electron/domain/batches'
+import { counts } from '../electron/domain/photos'
 import {
   importScanned,
   scanDirectory,
@@ -204,6 +205,67 @@ describe('importScanned', () => {
     const fourth = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
     expect(fourth).toEqual({ added: 0, updated: 6, missing: 0 })
     expect(missingFlag(db, gone)).toBe(0)
+  })
+
+  it('scopes missing marking/reset to the imported source in a multi-source batch', async () => {
+    const rootA = tempDir('selight-scan-src-a-')
+    const rootB = tempDir('selight-scan-src-b-')
+    writeFile(rootA, 'a1.jpg')
+    writeFile(rootA, 'sub/a2.jpg')
+    writeFile(rootB, 'b1.jpg')
+    writeFile(rootB, 'b2.jpg')
+
+    const db = tempDb()
+    const batch = createBatch(db)
+    const sourceA = addSource(db, batch.id, rootA)
+    const sourceB = addSource(db, batch.id, rootB)
+
+    importScanned(
+      db,
+      batch.id,
+      sourceA,
+      (await scanDirectory(rootA, fixedReader)).files
+    )
+    importScanned(
+      db,
+      batch.id,
+      sourceB,
+      (await scanDirectory(rootB, fixedReader)).files
+    )
+    expect(counts(db, batch.id).total).toBe(4)
+
+    // Re-import B after deleting b2: only B's deleted row may be flagged; source-A rows,
+    // absent from B's scan by definition, must stay present.
+    fs.rmSync(path.join(rootB, 'b2.jpg'))
+    const reB = importScanned(
+      db,
+      batch.id,
+      sourceB,
+      (await scanDirectory(rootB, fixedReader)).files
+    )
+    expect(reB).toMatchObject({ added: 0, updated: 1, missing: 1 })
+    expect(missingFlag(db, path.join(rootA, 'a1.jpg'))).toBe(0)
+    expect(missingFlag(db, path.join(rootA, 'sub', 'a2.jpg'))).toBe(0)
+    expect(missingFlag(db, path.join(rootB, 'b1.jpg'))).toBe(0)
+    expect(missingFlag(db, path.join(rootB, 'b2.jpg'))).toBe(1)
+
+    // Ruling 9 reset must be source-scoped too: a flagged A row clears on A re-import,
+    // while B's missing flag survives an import that does not touch B.
+    db.prepare('UPDATE photos SET missing = 1 WHERE abs_path = ?').run(
+      path.join(rootA, 'a1.jpg')
+    )
+    const reA = importScanned(
+      db,
+      batch.id,
+      sourceA,
+      (await scanDirectory(rootA, fixedReader)).files
+    )
+    expect(reA.missing).toBe(0)
+    expect(missingFlag(db, path.join(rootA, 'a1.jpg'))).toBe(0)
+    expect(missingFlag(db, path.join(rootB, 'b2.jpg'))).toBe(1)
+
+    // Rows are never deleted or reclassified: counts and inbox view stay intact.
+    expect(counts(db, batch.id)).toMatchObject({ total: 4, inbox: 4 })
   })
 
   it('imports read-only fixtures without writing to the source files', async () => {
