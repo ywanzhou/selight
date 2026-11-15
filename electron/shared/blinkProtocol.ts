@@ -73,6 +73,14 @@ export function isDecodeReply(value: unknown): value is BlinkDecodeReply {
   return typeof r.error === 'string' && r.error.length > 0
 }
 
+// Per-route CORS header policy. Only the photo route is fetched cross-origin (by the
+// Blink helper); thumb is consumed only through same-origin media URLs and must never
+// carry a wildcard header, or an XSS-compromised renderer could enumerate ids and
+// exfiltrate full-resolution sources with fetch directly.
+export function corsHeadersFor(hostname: string): Record<string, string> {
+  return hostname === 'photo' ? { 'Access-Control-Allow-Origin': '*' } : {}
+}
+
 // Whitelist gate used by pure tests with an explicit allowed set; the production
 // client injects a live DB lookup in place of the materialized set.
 export function isAllowedAbsPath(

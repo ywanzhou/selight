@@ -3,6 +3,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Database } from 'better-sqlite3'
 import { isInside, resolveMediaPath, type MediaRoots } from './resolve'
+import { corsHeadersFor } from '../shared/blinkProtocol'
 
 // registerSchemesAsPrivileged must run before app ready, so importing this module
 // from main.ts performs the registration as a load-time side effect. corsEnabled lets
@@ -57,11 +58,13 @@ export function registerMediaProtocol(
       if (file === null) return new Response('Forbidden', { status: 403 })
 
       const served = await net.fetch(pathToFileURL(file).href)
-      // The helper page and photo route are different selight hosts (and dev uses an
-      // http origin); allow the cross-origin fetch while the checks above stay the
-      // sole authorization rule.
+      // ACAO is photo-route-only (pure policy in corsHeadersFor): the helper page and
+      // photo route are different selight hosts, while thumb responses stay header-free
+      // so a compromised renderer cannot fetch-enumerate them cross-origin.
       const headers = new Headers(served.headers)
-      headers.set('Access-Control-Allow-Origin', '*')
+      for (const [name, value] of Object.entries(corsHeadersFor(url.hostname))) {
+        headers.set(name, value)
+      }
       return new Response(served.body, { status: served.status, headers })
     } catch {
       // Malformed URL or undecodable percent sequence: deny instead of crashing the handler.

@@ -63,7 +63,9 @@ function failAllPending(code: Parameters<typeof normalizeBlinkError>[0], message
 
 function attachReplyListener(win: BrowserWindow): void {
   if (!replyListenerAttached) {
-    ipcMain.on(BLINK_REPLY_CHANNEL, (_event, payload: unknown) => {
+    ipcMain.on(BLINK_REPLY_CHANNEL, (event, payload: unknown) => {
+      // Deep-forgery guard: only the singleton helper's own webContents may reply.
+      if (event.sender !== helperWindow?.webContents) return
       if (!isDecodeReply(payload)) return
       const entry = pending.get(payload.requestId)
       if (entry === undefined) return
@@ -174,8 +176,10 @@ async function sendDecode(photo: RegisteredPhoto, absPath: string): Promise<Buff
   const reply = new Promise<Buffer>((resolve, reject) => {
     pending.set(requestId, { resolve, reject })
   })
-  win.webContents.send(BLINK_REQUEST_CHANNEL, request)
   try {
+    // Inside the try: a synchronous send throw (e.g. window destroyed first) must not
+    // leak the pending entry.
+    win.webContents.send(BLINK_REQUEST_CHANNEL, request)
     return await withTimeout(
       () => reply,
       BLINK_TIMEOUT_MS,

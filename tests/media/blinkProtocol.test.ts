@@ -5,6 +5,7 @@ import {
   BLINK_THUMB_WIDTH,
   BLINK_TIMEOUT_MS,
   BlinkThumbnailError,
+  corsHeadersFor,
   isAllowedAbsPath,
   isDecodeReply,
   isDecodeRequest,
@@ -18,6 +19,18 @@ describe('blink protocol constants (Ruling 18)', () => {
     expect(BLINK_JPEG_QUALITY).toBeCloseTo(0.85)
     expect(BLINK_TIMEOUT_MS).toBe(10_000)
     expect(BLINK_MAX_CONCURRENCY).toBe(2)
+  })
+})
+
+describe('corsHeadersFor', () => {
+  it('returns the wildcard ACAO header only for the photo route the helper fetches cross-origin', () => {
+    expect(corsHeadersFor('photo')).toEqual({ 'Access-Control-Allow-Origin': '*' })
+  })
+
+  it('returns no CORS headers for thumb, helper assets or any other host', () => {
+    expect(corsHeadersFor('thumb')).toEqual({})
+    expect(corsHeadersFor('helper')).toEqual({})
+    expect(corsHeadersFor('evil')).toEqual({})
   })
 })
 
