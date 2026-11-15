@@ -1,25 +1,21 @@
-import { useCallback, useRef, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { Grid } from 'react-window'
 import type { PhotoRow, View } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
 import { DROP_MIME } from '../state/drop'
+import { cellWidth } from '../state/gridGeometry'
 import GridCell, { type ThumbCellData } from './ThumbCell'
 import { ChevronLeftIcon } from './icons'
 
-// Geometry derived from the 200px sidebar token and the mockup's .thumbs
-// metrics (12px side padding, 10px gaps, 3:2 thumbs). Slot sizes bake in the
-// gap; the last column/row carries no trailing gap so no horizontal overflow.
+// Two columns, 10px gaps, 3:2 thumbs. The cell width is measured from the
+// .thumbs-wrap content box at runtime instead of deriving from the 200px
+// sidebar token, so the Windows classic scrollbar can never squeeze the grid
+// into horizontal overflow. FALLBACK_CELL_W matches the old fixed first paint.
 const COLUMN_COUNT = 2
-const PADDING_X = 12
 const GAP = 10
-const CELL_W = (200 - PADDING_X * 2 - GAP) / COLUMN_COUNT // 83
-const CELL_H = Math.round((CELL_W * 2) / 3) // 55
-const ROW_H = CELL_H + GAP // 65
-
-function columnWidth(index: number): number {
-  return index === COLUMN_COUNT - 1 ? CELL_W : CELL_W + GAP
-}
+const FALLBACK_CELL_W = 83
+const FALLBACK_GRID_W = 176
 
 function headerTitle(view: View, folderName: string | undefined): string {
   switch (view.kind) {
@@ -51,6 +47,17 @@ export default function ThumbPane() {
   const { state, refresh, switchView } = useAppStore()
   const { batchId, view, photos, folders } = state
 
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [cellW, setCellW] = useState(FALLBACK_CELL_W)
+  const hasGrid = photos.length > 0
+
+  // Slot sizes bake in the gap; the last column/row carries no trailing gap,
+  // matching the original fixed geometry at any measured width.
+  const cellH = Math.round((cellW * 2) / 3)
+  const rowH = cellH + GAP
+  const columnWidth = (index: number): number =>
+    index === COLUMN_COUNT - 1 ? cellW : cellW + GAP
+
   const selection = useSelectionContext()
   const { selected, anchor, nonce, toggle } = selection
 
@@ -60,6 +67,29 @@ export default function ThumbPane() {
     view.kind === 'folder'
       ? `${batchId}:folder:${view.folderId}`
       : `${batchId}:${view.kind}`
+
+  // Measure the react-window grid's clientWidth, not the wrap's content box:
+  // the wrap never scrolls, so its width ignores the 15px classic scrollbar
+  // that appears inside the grid. Observing both elements catches sidebar
+  // resizes (wrap) and scrollbar appear/disappear (grid content box). Re-run
+  // on gridKey so a remounted Grid gets observed, and on hasGrid for 0 -> N.
+  useEffect(() => {
+    const wrap = wrapRef.current
+    const grid = wrap?.firstElementChild
+    if (!wrap || !grid) return
+    const measure = () => {
+      const width = (grid as HTMLElement).clientWidth
+      if (width > 0) setCellW(cellWidth(width, GAP))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(wrap)
+    observer.observe(grid)
+    const raf = requestAnimationFrame(measure)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(raf)
+    }
+  }, [hasGrid, gridKey])
 
   // Best-effort thumbnail preheat: tell the main-process queue which rendered
   // ids matter now. Dedupe identical ranges so steady scrolling stays quiet.
@@ -171,7 +201,11 @@ export default function ThumbPane() {
       {photos.length === 0 ? (
         <p className="pane-empty">{emptyText(view)}</p>
       ) : (
-        <div className="thumbs-wrap">
+        <div
+          className="thumbs-wrap"
+          ref={wrapRef}
+          style={{ '--thumb-w': `${cellW}px` } as CSSProperties}
+        >
           <Grid<ThumbCellData>
             key={gridKey}
             cellComponent={GridCell}
@@ -179,12 +213,14 @@ export default function ThumbPane() {
             columnCount={COLUMN_COUNT}
             columnWidth={columnWidth}
             rowCount={Math.ceil(photos.length / COLUMN_COUNT)}
-            rowHeight={ROW_H}
+            rowHeight={rowH}
             onCellsRendered={handleCellsRendered}
             tabIndex={0}
-            defaultWidth={200 - PADDING_X * 2}
+            defaultWidth={FALLBACK_GRID_W}
             defaultHeight={600}
-            style={{ width: '100%', height: '100%' }}
+            // overflowX guard: measured widths already fit, this only absorbs
+            // sub-pixel rounding so no horizontal scrollbar can ever appear.
+            style={{ width: '100%', height: '100%', overflowX: 'hidden' }}
           />
         </div>
       )}

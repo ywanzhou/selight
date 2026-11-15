@@ -560,8 +560,9 @@ button:disabled {
 
 .thumb {
   position: relative;
-  width: 83px;
-  height: 55px;
+  /* --thumb-w is set per-measurement by ThumbPane; aspect-ratio keeps 3:2. */
+  width: var(--thumb-w, 83px);
+  aspect-ratio: 3 / 2;
   border-radius: 5px;
   overflow: hidden;
   box-shadow: 0 1px 2.5px rgba(0, 0, 0, 0.22);
