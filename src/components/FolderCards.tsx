@@ -233,9 +233,11 @@ export default function FolderCards() {
             <span>新建文件夹</span>
           </button>
         )}
-
-        <TrashCard active={view.kind === 'trash'} count={counts?.trash ?? 0} />
       </div>
+
+      {/* Outside the scrolling .cards grid: pinned to the sidebar bottom so it
+          stays a reachable drop target no matter how many folders exist. */}
+      <TrashCard active={view.kind === 'trash'} count={counts?.trash ?? 0} />
 
       {menu !== null && (
         <FolderContextMenu

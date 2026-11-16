@@ -13,8 +13,8 @@ function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
-// Full-width red-toned card pinned as the last grid row. Same drop contract as
-// FolderCard but routes the payload to trash() instead of assign().
+// Red-toned horizontal strip pinned below the scrolling folder grid. Same drop
+// contract as FolderCard but routes the payload to trash() instead of assign().
 export default function TrashCard({ active, count }: TrashCardProps) {
   const { switchView, refresh } = useAppStore()
   const selection = useSelectionContext()
