@@ -35,6 +35,29 @@
 - README/操作手册 + 发布 checklist（含三个 smoke harness 的手工关卡）。
 - ~~用户放入 samples/ 激活 skip 测试~~（2026-11-16 已部分完成）：samples/ 现有 3 个真实 ARW（DSC04571 方向 1 + DSC04572/4573 方向 8，均自素材复制、gitignored），RAW harness 全绿（314 passed/1 skipped），EXIF 8 竖拍端到端转正已实证。剩余：补一个带 EXIF Orientation 的普通 JPG 激活最后 1 个 skip；有 EXIF 6 的 ARW 时再放入以补 6 号方向真实证据。
 
+## macOS 适配（计划在 Mac 上使用，2026-11-16 评估）
+
+现状结论：无 Windows 专属硬编码混入生产代码（路径全用 path.join/resolve；main.ts 已有 window-all-closed、helper 窗生命周期两个正确的 darwin 分支；better-sqlite3 prebuilds 含 darwin-arm64/x64；exiftool-vendored 靠 optionalDependencies 自动切换 .pl 包）。属适配而非移植，无模块需重写。
+
+### 阻断级（不做无法在 Mac 打包/分发）
+
+1. **electron-builder mac 配置**：当前只有 nsis target。加 `mac` 段（dmg+zip、category、arm64/x64 双架构或 universal）、`pack:mac` 脚本、`build/icon.icns`。
+2. **asarUnpack 平台 glob**：现仅解包 `exiftool-vendored.exe/**`；Mac 的 `exiftool-vendored.pl`（Perl 脚本+执行位）必须同样解包，否则 exiftool 无法运行。better-sqlite3 的 glob 通用，无需改。
+3. **签名与公证**：Gatekeeper 对未签名应用直接拦截。正式分发需 Apple Developer ID + hardenedRuntime + notarize；内测可先 ad-hoc 签名（用户需 xattr 解除隔离）。
+4. **harness darwin 进程管理**：tests/smoke 两个 .cjs 启动器用 taskkill /T /F + WMI，Mac 不适用；加 process.kill 进程树 + pgrep/ps 零残留校验的平台分支，否则自动化验证在 Mac 上失效。
+
+### 功能/体验级
+
+5. **红绿灯与工具栏重叠**：原生标题栏下 Mac 红绿灯占左上角约 70px，与批次下拉撞车。用 `titleBarStyle:'hiddenInset'` + 工具栏左侧安全区 padding。
+6. **I4 文件夹名校验平台化**：Windows 禁 `? * | < > " / \` + CON/NUL 保留名；macOS(APFS) 实际只禁 `/`（Finder 里 `:` 有历史遗留）。校验规则按 process.platform 分流，不能共用一套黑名单。
+7. **TCC 权限**：扫描 ~/Documents、桌面、外接盘可能触发系统授权弹窗；NSOpenPanel 选择的目录自动授权，递归未授权区域的错误要进现有 failures 清单而不是崩溃。
+8. **性能重测**：52s/1874 扫描耗时是 Windows exe 版 exiftool 数据；Mac 上 .pl 版与 Apple Silicon/Intel 差异需实测，exiftool 优化（webp 免 exiftool）优先级可能提高。
+9. **userData 路径验证**：Mac 上为 `~/Library/Application Support/择影/`，确认中文目录名与 session.json/缓存读写正常。
+
+### 建议顺序
+
+mac build 配置+解包 glob+icns（能出未签名 dmg）→ hiddenInset 布局走查 → harness darwin 分支并在真机跑通 314 测试与 RAW harness → I4 平台化 → 签名公证流水线。预估总工作量 3–5 人日（不含账号/CI 等待）。
+
 ## 总审 wontfix 记录（接受现状）
 
 ext NOT NULL、status/orientation 无 CHECK、备份毫秒冲突、getFolder 私有约定、索引兜底错误翻译、markMissing 分块上限、自转移审计行、from_status 可空类型、migrate 无 else、upsertSource 竞态、exiftool.end 超时、stat EACCES 可移植性、并发双写、双重缩放、TOCTOU/符号链接、固定 .tmp 名、react-window 滚动指标、undone 死选取、stateRef 时序、missing 冗余 mediaUrl、Esc 拖拽 hover、fan-out 计数（Ruling 16 实测关闭）、session 形状校验、harness 不进安装包、thumb/preview_path 预留列、EXIF-6 注释已在。
