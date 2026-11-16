@@ -28,6 +28,7 @@ const api: SelightApi = {
     ipcRenderer.invoke(IPC_CHANNELS.classifyAssign, photoIds, folderId),
   trash: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyTrash, photoIds),
   restore: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyRestore, photoIds),
+  unassign: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyUnassign, photoIds),
   undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId),
 
   exportBatch: (batchId, outputDir) =>

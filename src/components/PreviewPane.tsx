@@ -52,8 +52,8 @@ function MetaBar({ photo }: { photo: PhotoRow }) {
       </span>
       <span className="meta-hints">
         <kbd>←</kbd> <kbd>→</kbd> 切换&nbsp;&nbsp;·&nbsp;&nbsp;<kbd>1</kbd>–
-        <kbd>9</kbd> 分配&nbsp;&nbsp;·&nbsp;&nbsp;<kbd>Delete</kbd> 删除&nbsp;&nbsp;·&nbsp;&nbsp;
-        <kbd>Esc</kbd> 返回
+        <kbd>9</kbd> 分配&nbsp;&nbsp;·&nbsp;&nbsp;<kbd>0</kbd> 移回待分类&nbsp;&nbsp;·&nbsp;&nbsp;
+        <kbd>Delete</kbd> 删除&nbsp;&nbsp;·&nbsp;&nbsp;<kbd>Esc</kbd> 返回
       </span>
     </div>
   )

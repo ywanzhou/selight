@@ -217,6 +217,32 @@ describe('IPC handler contract — full curation chain', () => {
     expect(queueCalls.prioritize.at(-1)).toEqual([42, 43])
   })
 
+  it('unassign moves folder photos back to inbox through the handler and one undo restores them', async () => {
+    const { handlers } = setup()
+    const batch = await handlers.createBatch()
+    const folder = await handlers.createFolder(batch.id, '精选')
+    const root = makeFixtureTree()
+    await handlers.importDirectory(batch.id, root)
+    const inbox = await handlers.listView(batch.id, { kind: 'inbox' })
+    const ids = inbox.slice(0, 2).map((p) => p.id)
+
+    await handlers.assign(ids, folder.id)
+    expect(await handlers.unassign(ids)).toBe(2)
+
+    expect(await handlers.counts(batch.id)).toEqual({
+      total: 4,
+      inbox: 4,
+      folder: 0,
+      trash: 0
+    })
+    const backInInbox = await handlers.listView(batch.id, { kind: 'inbox' })
+    expect(backInInbox.map((p) => p.id)).toEqual(expect.arrayContaining(ids))
+
+    // The unassign is one action group: a single undo puts both photos back.
+    expect(await handlers.undo(batch.id)).toBe(true)
+    expect((await handlers.counts(batch.id)).folder).toBe(2)
+  })
+
   it('re-importing the same directory updates rows, reuses the source, and reports no failures', async () => {
     const { handlers, db } = setup()
     const batch = await handlers.createBatch()

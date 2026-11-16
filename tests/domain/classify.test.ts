@@ -12,6 +12,7 @@ import {
   MixedBatchError,
   assignToFolder,
   deleteFolderWithPhotos,
+  moveToInbox,
   moveToTrash,
   restoreFromTrash
 } from '../../electron/domain/classify'
@@ -258,6 +259,41 @@ describe('classification actions', () => {
     expect(photoState(db, photoId)).toEqual({ status: 'inbox', folder_id: null })
   })
 
+  it('moveToInbox returns folder photos to inbox with NULL folder in one undoable group', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, '精选')
+    const ids = [
+      addPhoto(db, batch.id, 'E:/photos/a.jpg'),
+      addPhoto(db, batch.id, 'E:/photos/b.jpg')
+    ]
+    assignToFolder(db, ids, folder.id)
+
+    expect(moveToInbox(db, ids)).toBe(2)
+
+    for (const id of ids) {
+      expect(photoState(db, id)).toEqual({ status: 'inbox', folder_id: null })
+    }
+    expect(counts(db, batch.id)).toEqual({ total: 2, inbox: 2, folder: 0, trash: 0 })
+    const moveActions = listActions(db, batch.id).filter((a) => a.to_status === 'inbox')
+    expect(moveActions).toHaveLength(2)
+    expect(new Set(moveActions.map((a) => a.batch_id_group)).size).toBe(1)
+    expect(
+      moveActions.every(
+        (a) =>
+          a.from_status === 'folder' &&
+          a.from_folder_id === folder.id &&
+          a.to_folder_id === null
+      )
+    ).toBe(true)
+
+    // One undo restores both photos to the folder.
+    expect(undoLastGroup(db, batch.id)).toBe(true)
+    for (const id of ids) {
+      expect(photoState(db, id)).toEqual({ status: 'folder', folder_id: folder.id })
+    }
+  })
+
   it('empty photoIds is a no-op returning 0 without creating any group or action rows', () => {
     const db = tempDb()
     const batch = createBatch(db)
@@ -266,6 +302,7 @@ describe('classification actions', () => {
     expect(assignToFolder(db, [], folder.id)).toBe(0)
     expect(moveToTrash(db, [])).toBe(0)
     expect(restoreFromTrash(db, [])).toBe(0)
+    expect(moveToInbox(db, [])).toBe(0)
     expect(actionCount(db)).toBe(0)
   })
 
@@ -280,7 +317,7 @@ describe('classification actions', () => {
     expect(distinctGroups(db, batch.id)).toBe(1)
   })
 
-  it('rejects mixed-batch photo ids in all three actions and rolls everything back', () => {
+  it('rejects mixed-batch photo ids in all four actions and rolls everything back', () => {
     const db = tempDb()
     const batchA = createBatch(db, 'a')
     const batchB = createBatch(db, 'b')
@@ -292,6 +329,7 @@ describe('classification actions', () => {
     expect(() => assignToFolder(db, mixed, folderA.id)).toThrowError(MixedBatchError)
     expect(() => moveToTrash(db, mixed)).toThrowError(MixedBatchError)
     expect(() => restoreFromTrash(db, mixed)).toThrowError(MixedBatchError)
+    expect(() => moveToInbox(db, mixed)).toThrowError(MixedBatchError)
 
     // The transaction rolled back: no photo changed state and no audit row was written.
     expect(photoState(db, photoA)).toEqual({ status: 'inbox', folder_id: null })

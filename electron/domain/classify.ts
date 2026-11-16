@@ -120,6 +120,12 @@ export function restoreFromTrash(db: Database, photoIds: number[]): number {
   })
 }
 
+// Selected folder photos back to inbox; applyActions gives the move one action
+// group with per-photo from/to rows, so undo reverses it like any classification.
+export function moveToInbox(db: Database, photoIds: number[]): number {
+  return applyActions(db, photoIds, () => ({ status: 'inbox', folderId: null }))
+}
+
 // Ruling 12: one transaction soft-deletes the folder and returns every folder photo to inbox,
 // logging one action per photo under a single new group so one undo restores everything.
 // With zero folder-status photos (empty or trash-only folder) a NULL-photo marker row still

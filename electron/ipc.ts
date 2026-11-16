@@ -5,6 +5,7 @@ import { counts, listPhotos } from './domain/photos'
 import {
   assignToFolder,
   deleteFolderWithPhotos,
+  moveToInbox,
   moveToTrash,
   restoreFromTrash
 } from './domain/classify'
@@ -157,6 +158,10 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
 
     async restore(photoIds) {
       return restoreFromTrash(db, photoIds)
+    },
+
+    async unassign(photoIds) {
+      return moveToInbox(db, photoIds)
     },
 
     async undo(batchId) {

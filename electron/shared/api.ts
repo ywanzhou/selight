@@ -67,6 +67,8 @@ export interface SelightHandlers {
   assign(photoIds: number[], folderId: number): Promise<number>
   trash(photoIds: number[]): Promise<number>
   restore(photoIds: number[]): Promise<number>
+  /** Move assigned folder photos back to the inbox (unassign); one undoable group. */
+  unassign(photoIds: number[]): Promise<number>
   undo(batchId: number): Promise<boolean>
 
   // Copies original folder-photo files into outputDir, one same-named subdir per
@@ -114,6 +116,7 @@ export const IPC_CHANNELS = {
   classifyAssign: 'selight:classify:assign',
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',
+  classifyUnassign: 'selight:classify:unassign',
   classifyUndo: 'selight:classify:undo',
   sessionGet: 'selight:session:get',
   sessionSave: 'selight:session:save',

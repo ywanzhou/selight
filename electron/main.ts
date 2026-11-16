@@ -160,6 +160,9 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC_CHANNELS.classifyRestore, (_event, photoIds: number[]) =>
     handlers.restore(photoIds)
   )
+  ipcMain.handle(IPC_CHANNELS.classifyUnassign, (_event, photoIds: number[]) =>
+    handlers.unassign(photoIds)
+  )
   ipcMain.handle(IPC_CHANNELS.classifyUndo, (_event, batchId: number) =>
     handlers.undo(batchId)
   )

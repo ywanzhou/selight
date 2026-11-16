@@ -147,6 +147,18 @@ export default function ThumbPane() {
     }
   }, [selected, refresh])
 
+  // Folder view's counterpart of restore: send the selection back to inbox.
+  const unassignSelection = useCallback(async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    try {
+      await window.selight.unassign(ids)
+      await refresh()
+    } catch (e) {
+      showError(e)
+    }
+  }, [selected, refresh])
+
   const folderName =
     view.kind === 'folder'
       ? folders.find((f) => f.id === view.folderId)?.name
@@ -192,6 +204,17 @@ export default function ThumbPane() {
               onClick={() => void restoreSelection()}
             >
               恢复
+            </button>
+          )}
+          {view.kind === 'folder' && (
+            // Same header placement as trash's 恢复; 0 key is the shortcut twin.
+            <button
+              type="button"
+              className="tb-btn restore-btn"
+              disabled={selected.size === 0}
+              onClick={() => void unassignSelection()}
+            >
+              移回待分类
             </button>
           )}
           <span className="cnt">{photos.length}</span>
