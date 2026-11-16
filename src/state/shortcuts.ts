@@ -6,6 +6,7 @@ export type ShortcutAction =
   | { type: 'navigate'; dir: -1 | 1 }
   | { type: 'assign'; folderIndex: number }
   | { type: 'trash' }
+  | { type: 'unassign' }
   | { type: 'undo' }
   | { type: 'backToInbox' }
   | { type: 'selectAll' }
@@ -54,6 +55,10 @@ export function shortcutToAction(
     case 'Delete':
     case 'Backspace':
       return { type: 'trash' }
+    // 0 = "no folder": move the selection back to inbox. The hook ignores it
+    // outside folder view, since inbox/trash photos have nothing to unassign.
+    case '0':
+      return { type: 'unassign' }
     case 'Escape':
       return { type: 'backToInbox' }
   }

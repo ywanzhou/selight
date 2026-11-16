@@ -1,6 +1,7 @@
 import { useState, type DragEvent } from 'react'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
+import { nextSelectionId } from '../state/selection'
 import { parseDropPayload } from '../state/drop'
 import { TrashIcon } from './icons'
 
@@ -13,8 +14,8 @@ function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
-// Full-width red-toned card pinned as the last grid row. Same drop contract as
-// FolderCard but routes the payload to trash() instead of assign().
+// Red-toned horizontal strip pinned below the scrolling folder grid. Same drop
+// contract as FolderCard but routes the payload to trash() instead of assign().
 export default function TrashCard({ active, count }: TrashCardProps) {
   const { switchView, refresh } = useAppStore()
   const selection = useSelectionContext()
@@ -25,11 +26,14 @@ export default function TrashCard({ active, count }: TrashCardProps) {
     setDragOver(false)
     const ids = parseDropPayload(e.dataTransfer)
     if (ids.length === 0) return
+    // Pin before the awaits, same as the Delete shortcut: after refresh the
+    // preview lands on the next remaining photo instead of going empty.
+    selection.pinSelection(nextSelectionId(selection.orderedIds, ids, selection.anchor))
     try {
       await window.selight.trash(ids)
       await refresh()
-      selection.clear()
     } catch (err) {
+      selection.pinSelection(null)
       showError(err)
     }
   }

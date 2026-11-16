@@ -9,6 +9,19 @@ interface DataTransferLike {
 }
 
 /**
+ * Ids a drag should carry: the whole current selection when the dragged photo
+ * belongs to it, otherwise just the dragged photo (the caller collapses the
+ * selection to that photo first). Null id means no photo is being dragged.
+ */
+export function dragPhotoIds(
+  selected: readonly number[],
+  draggedId: number | null
+): number[] {
+  if (draggedId === null) return []
+  return selected.includes(draggedId) ? [...selected] : [draggedId]
+}
+
+/**
  * Read and validate a dropped photo-id list. Never throws: a missing mime,
  * malformed JSON, a non-array body or non-number elements all degrade to [] so
  * the call site can simply skip the IPC when nothing usable was dropped.

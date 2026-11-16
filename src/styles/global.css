@@ -411,18 +411,35 @@ button:disabled {
   color: var(--color-tertiary);
 }
 
-/* Trash keeps its red language when active instead of turning blue. */
+/* Trash keeps its red language when active instead of turning blue. It lives
+   outside the .cards grid as a bottom-pinned horizontal strip. */
 .fcard.trash {
-  grid-column: 1 / -1;
+  flex-shrink: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin: 0 12px 12px;
+  text-align: left;
   background: rgba(255, 59, 48, 0.06);
 }
 
 .fcard.trash .fc-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
   color: var(--color-red);
 }
 
 .fcard.trash .fc-name {
   color: #d70015;
+}
+
+.fcard.trash .fc-count {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fcard.trash.active {

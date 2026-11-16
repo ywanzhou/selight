@@ -48,6 +48,17 @@ export function useShortcuts(disabled = false): void {
             await s.refresh()
             return
           }
+          case 'unassign': {
+            // Only folder view holds assigned photos; the guard also stops inbox
+            // photos from collecting no-op action rows that would poison undo.
+            if (s.state.view.kind !== 'folder') return
+            const ids = [...sel.selected]
+            if (ids.length === 0) return
+            sel.pinSelection(nextSelectionId(sel.orderedIds, ids, sel.anchor))
+            await window.selight.unassign(ids)
+            await s.refresh()
+            return
+          }
           case 'trash':
           case 'assign': {
             const ids = [...sel.selected]

@@ -71,6 +71,13 @@ describe('shortcutToAction digit assignment', () => {
   })
 })
 
+describe('shortcutToAction unassign', () => {
+  it('maps 0 to unassign with or without folders', () => {
+    expect(shortcutToAction(k({ key: '0' }), 0, false)).toEqual({ type: 'unassign' })
+    expect(shortcutToAction(k({ key: '0' }), 3, false)).toEqual({ type: 'unassign' })
+  })
+})
+
 describe('shortcutToAction destructive / undo keys', () => {
   it('maps both Delete and Backspace to trash', () => {
     expect(shortcutToAction(k({ key: 'Delete' }), 0, false)).toEqual({ type: 'trash' })
@@ -121,6 +128,7 @@ describe('shortcutToAction input guard', () => {
     { key: 'ArrowRight' },
     { key: '1' },
     { key: '9' },
+    { key: '0' },
     { key: 'Delete' },
     { key: 'Backspace' },
     { key: 'Escape' },
@@ -160,6 +168,7 @@ describe('isInputTarget', () => {
       { key: 'ArrowRight' },
       { key: '1' },
       { key: '9' },
+      { key: '0' },
       { key: 'Delete' },
       { key: 'Backspace' },
       { key: 'Escape' },
@@ -172,7 +181,7 @@ describe('isInputTarget', () => {
 })
 
 describe('shortcutToAction unmapped keys', () => {
-  for (const key of ['Enter', 'Tab', 'x', ' ', '0', 'F1']) {
+  for (const key of ['Enter', 'Tab', 'x', ' ', 'F1']) {
     it(`returns null for ${JSON.stringify(key)}`, () => {
       expect(shortcutToAction(k({ key }), 9, false)).toBeNull()
     })

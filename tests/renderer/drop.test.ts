@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DROP_MIME, parseDropPayload } from '../../src/state/drop'
+import { DROP_MIME, dragPhotoIds, parseDropPayload } from '../../src/state/drop'
 
 // DOM-free contract: the function only touches a getData-shaped object, so the
 // whole drag payload parsing runs under bare Node. The component call site is
@@ -70,5 +70,25 @@ describe('parseDropPayload', () => {
   it('filters nested arrays and other non-number scalars', () => {
     const dt = dtWith(DROP_MIME, JSON.stringify([1, [2], null, '3', true, 4]))
     expect(parseDropPayload(dt)).toEqual([1, 4])
+  })
+})
+
+describe('dragPhotoIds', () => {
+  it('carries the whole selection when the dragged photo belongs to it', () => {
+    expect(dragPhotoIds([3, 1, 2], 1)).toEqual([3, 1, 2])
+  })
+
+  it('falls back to just the dragged photo when it is outside the selection', () => {
+    expect(dragPhotoIds([3, 2], 7)).toEqual([7])
+  })
+
+  it('returns [] when no photo is being dragged', () => {
+    expect(dragPhotoIds([1, 2], null)).toEqual([])
+  })
+
+  it('does not leak mutations back into the passed selection', () => {
+    const selected = [1, 2]
+    dragPhotoIds(selected, 1)
+    expect(selected).toEqual([1, 2])
   })
 })
