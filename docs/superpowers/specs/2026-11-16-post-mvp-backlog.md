@@ -33,7 +33,7 @@
 - 代码签名（未签名会触发 SmartScreen）。
 - 离线可复现打包文档化（electron zip + SHASUMS256.txt 缓存）。
 - README/操作手册 + 发布 checklist（含三个 smoke harness 的手工关卡）。
-- 用户放入 samples/（3-5 张含竖拍 ARW，最好有 EXIF 6，加普通 JPG）后激活 4 个 skip 测试，补真实 RAW 端到端证据。
+- ~~用户放入 samples/ 激活 skip 测试~~（2026-11-16 已部分完成）：samples/ 现有 3 个真实 ARW（DSC04571 方向 1 + DSC04572/4573 方向 8，均自素材复制、gitignored），RAW harness 全绿（314 passed/1 skipped），EXIF 8 竖拍端到端转正已实证。剩余：补一个带 EXIF Orientation 的普通 JPG 激活最后 1 个 skip；有 EXIF 6 的 ARW 时再放入以补 6 号方向真实证据。
 
 ## 总审 wontfix 记录（接受现状）
 
