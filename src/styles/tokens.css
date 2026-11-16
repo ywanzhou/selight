@@ -1,0 +1,42 @@
+/* Design tokens for 择影. Values mirror the approved layout-macos-v3 mockup's :root
+   and the spec palette verbatim. Light mode only — no dark-mode overrides. */
+:root {
+  /* Text colors */
+  --color-label: #1d1d1f;
+  --color-secondary: #6e6e73;
+  --color-tertiary: #86868b;
+
+  /* Hairline separators (0.5px, matching the mockup's crisp macOS edges) */
+  --color-separator: rgba(0, 0, 0, 0.1);
+  --hairline: 0.5px solid var(--color-separator);
+  --hairline-strong: 0.5px solid rgba(0, 0, 0, 0.12);
+
+  /* System accents */
+  --color-blue: #007aff;
+  --color-red: #ff3b30;
+  --color-orange: #ff9500;
+
+  /* Surfaces */
+  --bg-app: #f6f6f8;
+  --bg-sidebar: rgba(240, 240, 243, 0.8);
+  --bg-toolbar: rgba(246, 246, 248, 0.85);
+  --bg-control: rgba(0, 0, 0, 0.06);
+  --bg-control-track: rgba(0, 0, 0, 0.1);
+  --card-background: rgba(255, 255, 255, 0.75);
+
+  /* Frosted material */
+  --frost-sidebar: saturate(180%) blur(30px);
+  --frost-toolbar: saturate(180%) blur(20px);
+
+  /* Metrics from the mockup */
+  --toolbar-height: 52px;
+  --sidebar-left-width: 200px;
+  --sidebar-right-width: 264px;
+  --radius-control: 7px;
+  --radius-card: 10px;
+  --radius-window: 12px;
+
+  --font-stack:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Helvetica Neue", "Segoe UI", sans-serif;
+}

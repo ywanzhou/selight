@@ -1,0 +1,77 @@
+{
+  "name": "selight",
+  "version": "0.1.0",
+  "description": "择影 photo-curation app",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
+    "test": "vitest run",
+    "pack:win": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "app.selight.desktop",
+    "productName": "择影",
+    "artifactName": "selight-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "!out/main/harness.js",
+      "!out/main/raw-harness.js",
+      "!**/node_modules/better-sqlite3/build/**",
+      "!**/node_modules/better-sqlite3/deps/**",
+      "!**/*.map",
+      "!tests/**/*",
+      "!.superpowers/**/*",
+      "!samples/**/*",
+      "!素材/**/*",
+      "!docs/**/*"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**",
+      "**/node_modules/exiftool-vendored.exe/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.1.1",
+    "exiftool-vendored": "^39.3.0",
+    "jpeg-autorotate": "^9.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-window": "^2.5.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.1.0"
+  }
+}
