@@ -1,6 +1,7 @@
 import { useState, type DragEvent } from 'react'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
+import { nextSelectionId } from '../state/selection'
 import { parseDropPayload } from '../state/drop'
 import { TrashIcon } from './icons'
 
@@ -25,11 +26,14 @@ export default function TrashCard({ active, count }: TrashCardProps) {
     setDragOver(false)
     const ids = parseDropPayload(e.dataTransfer)
     if (ids.length === 0) return
+    // Pin before the awaits, same as the Delete shortcut: after refresh the
+    // preview lands on the next remaining photo instead of going empty.
+    selection.pinSelection(nextSelectionId(selection.orderedIds, ids, selection.anchor))
     try {
       await window.selight.trash(ids)
       await refresh()
-      selection.clear()
     } catch (err) {
+      selection.pinSelection(null)
       showError(err)
     }
   }

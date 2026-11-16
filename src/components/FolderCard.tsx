@@ -2,6 +2,7 @@ import { useState, type DragEvent } from 'react'
 import type { FolderRow } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
+import { nextSelectionId } from '../state/selection'
 import { parseDropPayload } from '../state/drop'
 import { FolderIcon } from './icons'
 import InlineNameInput from './InlineNameInput'
@@ -44,13 +45,17 @@ export default function FolderCard({
     const ids = parseDropPayload(e.dataTransfer)
     // Empty payload (or an unparseable one) never reaches the IPC layer.
     if (ids.length === 0) return
+    // Pin before the awaits, same as keyboard assign: once refresh recreates the
+    // selection model, the layout effect anchors the next remaining photo so the
+    // preview advances instead of going empty.
+    selection.pinSelection(nextSelectionId(selection.orderedIds, ids, selection.anchor))
     try {
       await window.selight.assign(ids, folder.id)
       // refresh re-pulls the current view: the photos leave inbox/another folder
       // automatically, which is the folder-to-folder re-filtering path.
       await refresh()
-      selection.clear()
     } catch (err) {
+      selection.pinSelection(null)
       showError(err)
     }
   }
