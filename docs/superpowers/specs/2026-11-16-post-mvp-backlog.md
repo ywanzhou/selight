@@ -26,6 +26,8 @@
 - Harness 债：两个 launcher 加 `child.on('error')`；app.exit 前显式清理 %TEMP% 目录或改 app.quit；空样本加 `--strict` 开关；samples 不可读时按 failures 语义 skip；SUPPORTED_EXT 从 formats.ts 同源导出；harness 进 release checklist。
 - 渲染层：RecoveryDialog onClose useCallback；右键菜单 focus trap；重命名切换丢草稿；回收站拖到文件夹加 toast；showError 抽公共模块；saveSession 恢复视图一帧 inbox 闪烁；ExportDialog aria-valuemax 首帧与 progress 首事件时序；failures 字符串结构化；文件大小 KB/MB 自适应；未消费图标（Grid/List/Search）清理；selection 只写镜像清理；HANDLER_NAMES 由 IPC_CHANNELS 派生。
 - 预览尺寸互换断言随 samples/ 激活自动闭环（harness 已写好）。
+- **cancelImport 作用域（2026-11-17 四期评审登记）**：取消是进程级 EnrichmentService.cancel，导入期间若用户切批次，openBatch 的补偿提交会被一并清掉。无数据错误（下次打开批次重新补偿），但与"只取消本次导入"的直觉有偏差；后续可给导入期间的批次下拉加禁用，或给 cancel 加 scan 关联作用域。
+- 富化进度计数在 in-flight 任务 settle 于 cancel 之后时可能产生瞬时 done>total 事件（仅工具栏展示影响，下一事件即纠正）；需要严格单调时改为 cancel 时忽略被清任务的 settle。
 
 ## 发行前必做
 
