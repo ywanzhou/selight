@@ -23,10 +23,16 @@ afterEach(() => {
 
 function makeFake(handlers: {
   orientation?: number
+  imageWidth?: number
+  imageHeight?: number
   thumbnail?: Buffer | (() => Buffer)
   preview?: Buffer | (() => Buffer)
 }) {
-  const read = vi.fn(async (_file: string) => ({ Orientation: handlers.orientation }))
+  const read = vi.fn(async (_file: string) => ({
+    Orientation: handlers.orientation,
+    ImageWidth: handlers.imageWidth,
+    ImageHeight: handlers.imageHeight
+  }))
   const extract = vi.fn(async (tag: 'ThumbnailImage' | 'PreviewImage', _file: string) => {
     if (tag === 'ThumbnailImage') {
       if (handlers.thumbnail === undefined) throw new Error('no thumbnail')
@@ -64,6 +70,47 @@ describe('ExiftoolReader.readOrientation', () => {
       extractBinaryTagToBuffer: fake.extract
     })
     await expect(reader.readOrientation('x.arw', '.arw')).resolves.toBe(1)
+  })
+})
+
+describe('ExiftoolReader.readImageMeta', () => {
+  it('maps orientation and dimensions through, defaulting orientation to 1', async () => {
+    const fake = makeFake({ orientation: 6, imageWidth: 6000, imageHeight: 4000 })
+    const reader = new ExiftoolReader({
+      read: fake.read,
+      extractBinaryTagToBuffer: fake.extract
+    })
+    await expect(reader.readImageMeta('x.arw', '.arw')).resolves.toEqual({
+      orientation: 6,
+      width: 6000,
+      height: 4000
+    })
+  })
+
+  it('falls back to orientation 1 and null dimensions when tags are absent', async () => {
+    const fake = makeFake({})
+    const reader = new ExiftoolReader({
+      read: fake.read,
+      extractBinaryTagToBuffer: fake.extract
+    })
+    await expect(reader.readImageMeta('x.arw', '.arw')).resolves.toEqual({
+      orientation: 1,
+      width: null,
+      height: null
+    })
+  })
+
+  it('rejects unknown orientation values while keeping whatever dimensions exist', async () => {
+    const fake = makeFake({ orientation: 9, imageWidth: 120 })
+    const reader = new ExiftoolReader({
+      read: fake.read,
+      extractBinaryTagToBuffer: fake.extract
+    })
+    await expect(reader.readImageMeta('x.arw', '.arw')).resolves.toEqual({
+      orientation: 1,
+      width: 120,
+      height: null
+    })
   })
 })
 
