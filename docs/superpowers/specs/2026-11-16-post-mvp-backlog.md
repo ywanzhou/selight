@@ -11,11 +11,11 @@
 
 ## 中优先
 
-5. **I5 照片宽高入库**：exiftool read() 已返回 ImageWidth/ImageHeight，扫描期写入 photos.width/height，补全 spec §4.3 信息条的尺寸项（当前该条件恒假）。
+5. **I5 照片宽高入库**：exiftool read() 已返回 ImageWidth/ImageHeight，扫描期写入 photos.width/height，补全 spec §4.3 信息条的尺寸项（当前该条件恒假）。**（2026-11-17 二期完成：EnrichmentService 富化写入展示态宽高（6/8 交换），MetaBar 条件已生效。）**
 6. **I7 占位缩略图重试**：提供"重试生成"动作（删 `<id>.jpg`+sidecar 后重新 enqueue），并顺手把 sidecar 写序调整为"先 marker 后图、先删 marker 后 rename"。**（2026-11-17 三期完成：`retryMedia(id, kind)` IPC 经 `retryMediaGeneration` 删缓存+sidecar 后重新入对应队列，PreviewPane 失败态提供重试按钮，缩略图与预览同函数覆盖。）**
 7. **exiftool 扫描耗时优化**：现状 52.2s/1874（stay-open 单例串行 read 往返，后台不阻塞 UI）。webp 可免 exiftool（Blink imageOrientation:'from-image' 自带方向），jpg 仍需；优化后预期降幅明显。**（2026-11-17 二期完成并关闭：直读格式统一走 sharp.metadata 读方向与尺寸，exiftool 只服务 RAW；fs-only 发现 + EnrichmentService 有界并发池，实测见高优先 #1 二期条目。）**
 8. **IPC 错误通知组件**：统一 window.alert/confirm 为 macOS 风格通知；错误原文直显改中文映射（FolderNameConflictError 等已有分支）。
-9. **缓存 GC**：missing 占位死产物、长期失效缓存的清理策略。
+9. **缓存 GC**：missing 占位死产物、长期失效缓存的清理策略。**（2026-11-17 四期完成：`planCacheCleanup` 纯函数只读选出孤儿 id、missing=1 死产物、孤立 sidecar（严格限定缓存根内数字命名文件），`runCacheCleanup` 执行并计数，`cleanupMediaCache` IPC + 工具栏手动入口，源文件零触碰。）**
 
 ## 低优先 / 整洁度
 
@@ -26,6 +26,8 @@
 - Harness 债：两个 launcher 加 `child.on('error')`；app.exit 前显式清理 %TEMP% 目录或改 app.quit；空样本加 `--strict` 开关；samples 不可读时按 failures 语义 skip；SUPPORTED_EXT 从 formats.ts 同源导出；harness 进 release checklist。
 - 渲染层：RecoveryDialog onClose useCallback；右键菜单 focus trap；重命名切换丢草稿；回收站拖到文件夹加 toast；showError 抽公共模块；saveSession 恢复视图一帧 inbox 闪烁；ExportDialog aria-valuemax 首帧与 progress 首事件时序；failures 字符串结构化；文件大小 KB/MB 自适应；未消费图标（Grid/List/Search）清理；selection 只写镜像清理；HANDLER_NAMES 由 IPC_CHANNELS 派生。
 - 预览尺寸互换断言随 samples/ 激活自动闭环（harness 已写好）。
+- **cancelImport 作用域（2026-11-17 四期评审登记）**：取消是进程级 EnrichmentService.cancel，导入期间若用户切批次，openBatch 的补偿提交会被一并清掉。无数据错误（下次打开批次重新补偿），但与"只取消本次导入"的直觉有偏差；后续可给导入期间的批次下拉加禁用，或给 cancel 加 scan 关联作用域。
+- 富化进度计数在 in-flight 任务 settle 于 cancel 之后时可能产生瞬时 done>total 事件（仅工具栏展示影响，下一事件即纠正）；需要严格单调时改为 cancel 时忽略被清任务的 settle。
 
 ## 发行前必做
 

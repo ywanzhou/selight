@@ -8,6 +8,7 @@ import { createBatch } from '../../electron/domain/batches'
 import { createFolder } from '../../electron/domain/folders'
 import {
   counts,
+  findEnrichedPhotoIds,
   findUnenrichedPhotoIds,
   listPhotos,
   markMissing,
@@ -133,6 +134,21 @@ describe('photo domain module', () => {
     // Failed enrichment must keep the NULL marker so catch-up can retry.
     db.prepare('UPDATE photos SET orientation = 1 WHERE id = ?').run(b.id)
     expect(findUnenrichedPhotoIds(db, batchA.id)).toEqual([b.id])
+  })
+
+  it('findEnrichedPhotoIds returns only dimension-filled rows, ordered and limited', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const a = upsertPhoto(db, makeInput(db, batch.id, 'E:/a.jpg')).row.id
+    const b = upsertPhoto(db, makeInput(db, batch.id, 'E:/b.jpg')).row.id
+    const c = upsertPhoto(db, makeInput(db, batch.id, 'E:/c.jpg')).row.id
+    db.prepare('UPDATE photos SET width = 100, height = 80 WHERE id = ?').run(a)
+    db.prepare('UPDATE photos SET width = 200, height = 160 WHERE id = ?').run(c)
+
+    expect(findEnrichedPhotoIds(db, 10)).toEqual([a, c])
+    expect(findEnrichedPhotoIds(db, 1)).toEqual([a])
+    // Unenriched rows (b) never enter the backfill candidate set.
+    expect(findEnrichedPhotoIds(db, 10)).not.toContain(b)
   })
 
   it('re-upserts the same batch + absPath with created=false and no new row', () => {

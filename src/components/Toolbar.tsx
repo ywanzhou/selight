@@ -9,11 +9,24 @@ function showError(e: unknown): void {
 }
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
-  const { state, openBatch, importDirectory, deleteBatch, renameBatch } = useAppStore()
+  const {
+    state,
+    openBatch,
+    importDirectory,
+    cancelImport,
+    deleteBatch,
+    renameBatch,
+    cleanupMediaCache
+  } = useAppStore()
   const { batches, batchId, counts, loading, enrichProgress } = state
   const [renaming, setRenaming] = useState(false)
   const [importing, setImporting] = useState(false)
   const currentName = batches.find((b) => b.id === batchId)?.name ?? ''
+
+  async function handleCleanupCache() {
+    const { removed } = await cleanupMediaCache()
+    if (removed > 0) window.alert(`已清理 ${removed} 个缓存文件`)
+  }
 
   const total = counts?.total ?? 0
   const classified = total - (counts?.inbox ?? 0)
@@ -44,6 +57,11 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
     } finally {
       setImporting(false)
     }
+  }
+
+  async function handleCancelImport() {
+    await cancelImport()
+    setImporting(false)
   }
 
   return (
@@ -105,17 +123,43 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
       <CreateBatchButton />
 
+      {/* Text button rather than a second TrashIcon: cache cleanup is safe and
+          reversible, unlike the adjacent destructive batch-delete action. */}
       <button
         type="button"
         className="tb-btn"
-        disabled={batchId === null || loading || importing}
+        title="清理失效的缩略图与预览缓存"
+        disabled={loading}
         onClick={() => {
-          handleImport().catch(showError)
+          handleCleanupCache().catch(showError)
         }}
       >
-        <ImportIcon />
-        {importing ? '导入中…' : '导入文件夹'}
+        清缓存
       </button>
+
+      {importing ? (
+        <button
+          type="button"
+          className="tb-btn"
+          onClick={() => {
+            handleCancelImport().catch(showError)
+          }}
+        >
+          取消导入
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="tb-btn"
+          disabled={batchId === null || loading}
+          onClick={() => {
+            handleImport().catch(showError)
+          }}
+        >
+          <ImportIcon />
+          导入文件夹
+        </button>
+      )}
 
       {/* Wrapper span carries the tooltip: a disabled button itself never fires
           mouse events, so its own title would never appear. */}

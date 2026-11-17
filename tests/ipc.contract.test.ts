@@ -21,6 +21,7 @@ interface Setup {
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
   enrichmentCalls: number[][]
+  enrichment: { submit: (ids: number[]) => void; cancel: ReturnType<typeof vi.fn>; stop: () => void }
   retryCalls: { thumb: number[][]; photo: number[][] }
   sessionStore: SessionStore
   progressCalls: Array<[number, number]>
@@ -53,6 +54,7 @@ function setup(): Setup {
   const enrichmentCalls: number[][] = []
   const enrichment = {
     submit: (ids: number[]) => enrichmentCalls.push([...ids]),
+    cancel: vi.fn(),
     stop: () => undefined
   }
 
@@ -86,6 +88,7 @@ function setup(): Setup {
     db,
     queueCalls,
     enrichmentCalls,
+    enrichment,
     retryCalls,
     sessionStore,
     progressCalls,
@@ -273,6 +276,58 @@ describe('IPC handler contract — full curation chain', () => {
     enrichmentCalls.length = 0
     await handlers.openBatch(batch.id)
     expect(enrichmentCalls).toHaveLength(0)
+  })
+
+  it('cancelImport during discovery returns an empty result and writes no rows', async () => {
+    const { handlers, db, enrichmentCalls } = setup()
+    const batch = await handlers.createBatch()
+    const root = makeFixtureTree()
+
+    // Do not await: cancel while the fs walk is suspended in its first readdir,
+    // so the abort check at the next walk boundary throws AbortError.
+    const inFlight = handlers.importDirectory(batch.id, root)
+    handlers.cancelImport()
+    const result = await inFlight
+
+    expect(result).toEqual({ added: 0, updated: 0, missing: 0, failures: [] })
+    expect(
+      (db.prepare('SELECT COUNT(*) AS n FROM photos').get() as { n: number }).n
+    ).toBe(0)
+    // The aborted import never reached the enrichment submission.
+    expect(enrichmentCalls).toEqual([])
+  })
+
+  it('cancelImport cancels enrichment and remains safe with no active scan', async () => {
+    const { handlers, enrichment } = setup()
+    await handlers.cancelImport()
+    expect(enrichment.cancel).toHaveBeenCalledTimes(1)
+
+    // Re-open still works after a cancel with no scan in flight.
+    const batch = await handlers.createBatch()
+    const state = await handlers.openBatch(batch.id)
+    expect(state.batch.id).toBe(batch.id)
+  })
+
+  it('cleanupMediaCache deletes orphan cache files and keeps live artifacts', async () => {
+    const { handlers, mediaRoots } = setup()
+    const root = makeFixtureTree()
+    const imported = await handlers.importDirectory((await handlers.createBatch()).id, root)
+    expect(imported.added).toBeGreaterThan(0)
+
+    const liveId = (await handlers.listView((await handlers.listBatches())[0].id, {
+      kind: 'inbox'
+    }))[0].id
+    fs.writeFileSync(path.join(mediaRoots.thumbDir, `${liveId}.jpg`), 'live')
+    const orphan = path.join(mediaRoots.thumbDir, '888888.jpg')
+    const orphanSidecar = path.join(mediaRoots.previewDir, '888888.jpg.placeholder')
+    fs.writeFileSync(orphan, 'orphan')
+    fs.writeFileSync(orphanSidecar, '')
+
+    const result = await handlers.cleanupMediaCache()
+    expect(fs.existsSync(orphan)).toBe(false)
+    expect(fs.existsSync(orphanSidecar)).toBe(false)
+    expect(fs.existsSync(path.join(mediaRoots.thumbDir, `${liveId}.jpg`))).toBe(true)
+    expect(result.removed).toBe(2)
   })
 
   it('retryMedia dispatches to the matching thumb or preview retry seam', async () => {

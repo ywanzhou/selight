@@ -263,6 +263,54 @@ describe('EnrichmentService', () => {
     service.stop()
   })
 
+  it('cancels queued work but stays reusable for later submits', async () => {
+    const db = tempDb()
+    const batchId = createBatch(db).id
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-cancel-'))
+    dirs.push(dir)
+    // Four direct files; concurrency 1 means only the first starts before cancel.
+    const ids: number[] = []
+    for (let i = 0; i < 4; i += 1) {
+      const file = path.join(dir, `c${i}.jpg`)
+      await writeJpeg(file, { width: 200, height: 100 })
+      ids.push(insertPhoto(db, batchId, file, '.jpg'))
+    }
+    const events: Array<[number, number]> = []
+    const service = new EnrichmentService(
+      db,
+      fakeReader({ orientation: 1, width: 1, height: 1 }),
+      { directConcurrency: 1, onProgress: (d, t) => events.push([d, t]) }
+    )
+
+    service.submit(ids)
+    // Cancel synchronously after submit: pump started only the first worker,
+    // so the other three ids are still queued and must be dropped, not run.
+    service.cancel()
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const enrichedAfterCancel = (
+      db
+        .prepare('SELECT COUNT(*) AS n FROM photos WHERE width IS NOT NULL')
+        .get() as { n: number }
+    ).n
+    expect(enrichedAfterCancel).toBeLessThanOrEqual(1)
+
+    // The service is still alive: a fresh submit processes normally.
+    service.submit(ids)
+    await service.whenIdle()
+    const allEnriched = (
+      db
+        .prepare('SELECT COUNT(*) AS n FROM photos WHERE width IS NOT NULL')
+        .get() as { n: number }
+    ).n
+    expect(allEnriched).toBe(4)
+    // Progress counts after a cancel+resubmit may include the settling task
+    // that was in flight at cancel time; assert the reset event fired instead
+    // of an exact final pair.
+    expect(events).toContainEqual([0, 0])
+    service.stop()
+  })
+
   it('never starts work submitted after stop', async () => {
     const db = tempDb()
     const batchId = createBatch(db).id

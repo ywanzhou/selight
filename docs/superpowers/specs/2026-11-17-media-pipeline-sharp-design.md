@@ -168,9 +168,15 @@
 1. **一期 `feat/media-sharp-foundation`**：装 sharp（先 spike 验证主进程加载 + 真实 webp 出图，失败整体回退）；重写缩略图管线全格式走 sharp；删除 Blink/nativeImage/jpeg-autorotate 及关联测试/harness；smoke harness 改造并记录 RSS。验收：typecheck、全量测试、build、真机 smoke 全绿。
 2. **二期 `feat/import-discovery-enrich`**：scanner fs-only 化；EnrichmentService 单例（池化富化 + 去重 + 聚合进度通道）；metadata 入库（展示态宽高、6/8 交换）；`findUnenrichedPhotoIds` + openBatch 补偿；MediaQueue prioritize 修复；media:ready 通道 + useMediaUrl 重试；按需入队 + worker 对未富化 RAW 的点用点自愈；导入禁按钮 + 富化进度。验收：1874 素材导入关键路径 <2s（harness 计时），视口滚动缩略图按优先级出现，中断重启后打开批次能补齐元数据。
 3. **三期 `feat/preview-2048`**：ensurePreview + photo 路由切换到预览副本，原图通道关闭的安全检查；PreviewPane 三态重构（生成中灰底/missing 文案/失败点击重试），三态判定走 src/state 纯函数与 node 测试；MetaBar 展示态尺寸验证。
-4. **四期（可选）`feat/thumb-backfill`**：onIdle 低优先级 backfill（darktable-generate-cache 的自动版）、主动取消、与 backlog #9 缓存 GC 合并设计。
+4. **四期（可选）`feat/thumb-backfill-gc`**：onIdle 低优先级 backfill（darktable-generate-cache 的自动版）、主动取消、与 backlog #9 缓存 GC 合并设计。
 
-backlog #1、#2 在二期、三期完成后分别标注完成日期与做法。
+### 实施状态（2026-11-17 全部完成并合并 main）
+
+- 一期 `media-sharp-foundation`：sharp 替换三管线，backlog 缩略图真机 p50 15ms 级。
+- 二期 `import-discovery-enrichment`：fs-only 发现 + EnrichmentService；关键路径实测 fs 3.2s + 入库 0.25s（旧 52.6s 阻塞），1874 行富化后台 9.8s；backlog #1/#7 关闭。
+- 三期 `preview-2048`：photo 路由零源字节、8000×6000 源输出 2048×1536 且该步 RSS 零增量（进程总 maxRSS ≈413MB）、三态预览 + retryMedia，backlog #2/I7 关闭。
+- 四期 `thumb-backfill-gc`：onIdle 回填（FIFO 不抢视口）、AbortSignal 取消（scanner/queue/service/IPC/UI 全链路）、缓存 GC 纯函数 + 手动入口，backlog #9 关闭。
+- 遗留待验证：macOS arm64 sharp 打包（无环境）、全 RAW 大批量性能（样本仅 3 ARW）、`pack:win` 安装包体积增量。
 
 ## 9. 风险与待验证
 

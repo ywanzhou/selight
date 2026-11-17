@@ -41,19 +41,25 @@ export interface ScanResult {
 // Discovery is deliberately fs-only: readdir + stat + extension filtering.
 // EXIF orientation and pixel dimensions are enriched later in the background so
 // a large import returns in seconds instead of paying one exiftool round trip
-// per file on the critical path.
-export async function scanDirectory(root: string): Promise<ScanResult> {
+// per file on the critical path. An aborted signal stops the walk immediately,
+// before any rows are imported.
+export async function scanDirectory(
+  root: string,
+  signal?: AbortSignal
+): Promise<ScanResult> {
   const files: ScannedFile[] = []
   const failures: string[] = []
-  await walk(root, files, failures)
+  await walk(root, files, failures, signal)
   return { files, failures }
 }
 
 async function walk(
   dir: string,
   out: ScannedFile[],
-  failures: string[]
+  failures: string[],
+  signal?: AbortSignal
 ): Promise<void> {
+  signal?.throwIfAborted()
   let entries: fs.Dirent[]
   try {
     entries = await fs.promises.readdir(dir, { withFileTypes: true })
@@ -64,9 +70,10 @@ async function walk(
   }
 
   for (const entry of entries) {
+    signal?.throwIfAborted()
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await walk(absPath, out, failures)
+      await walk(absPath, out, failures, signal)
       continue
     }
     if (!entry.isFile()) continue

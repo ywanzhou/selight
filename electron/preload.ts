@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type SelightApi } from './shared/api'
+import { IPC_CHANNELS, type MediaReadyEvent, type SelightApi } from './shared/api'
 
 // Sandbox-safe: only contextBridge and ipcRenderer are touched (electron-vite bundles
 // this file). No Node APIs, so it runs with sandbox: true + contextIsolation: true.
@@ -20,6 +20,7 @@ const api: SelightApi = {
 
   importDirectory: (batchId, rootPath) =>
     ipcRenderer.invoke(IPC_CHANNELS.photoImport, batchId, rootPath),
+  cancelImport: () => ipcRenderer.invoke(IPC_CHANNELS.importCancel),
   listView: (batchId, view) =>
     ipcRenderer.invoke(IPC_CHANNELS.photoListView, batchId, view),
   counts: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.photoCounts, batchId),
@@ -28,6 +29,7 @@ const api: SelightApi = {
   markSelection: (ids) => ipcRenderer.invoke(IPC_CHANNELS.photoMarkSelection, ids),
   retryMedia: (photoId, kind) =>
     ipcRenderer.invoke(IPC_CHANNELS.mediaRetry, photoId, kind),
+  cleanupMediaCache: () => ipcRenderer.invoke(IPC_CHANNELS.mediaCacheCleanup),
 
   assign: (photoIds, folderId) =>
     ipcRenderer.invoke(IPC_CHANNELS.classifyAssign, photoIds, folderId),
@@ -67,10 +69,7 @@ const api: SelightApi = {
   },
 
   onMediaReady: (cb) => {
-    const listener = (
-      _event: unknown,
-      payload: { id: number; kind: 'thumb'; ok: boolean }
-    ) => cb(payload)
+    const listener = (_event: unknown, payload: MediaReadyEvent) => cb(payload)
     ipcRenderer.on(IPC_CHANNELS.mediaReady, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.mediaReady, listener)
   }

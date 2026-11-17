@@ -141,6 +141,38 @@ describe('scanDirectory (fs-only discovery)', () => {
     expect(result.failures).toContain(root)
   })
 
+  it('rejects with AbortError when the signal is already aborted', async () => {
+    const root = makeFixtureTree()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(scanDirectory(root, controller.signal)).rejects.toThrow(
+      /aborted|AbortError/
+    )
+  })
+
+  it('rejects a pre-aborted signal on a populated tree without partial results', async () => {
+    const root = tempDir('selight-scan-abort-')
+    for (let i = 0; i < 20; i += 1) writeFile(root, `f${i}.jpg`)
+    const controller = new AbortController()
+    // Aborted before the walk starts: the boundary check rejects instead of
+    // returning a partial result that would be imported as complete.
+    controller.abort()
+    await expect(scanDirectory(root, controller.signal)).rejects.toThrow()
+  })
+
+  it('aborts while walking a deep tree, stopping before later directories', async () => {
+    const root = tempDir('selight-scan-walk-abort-')
+    for (let depth = 0; depth < 8; depth += 1) {
+      writeFile(root, `d${depth}/photo.jpg`, 'x')
+    }
+    const controller = new AbortController()
+    const pending = scanDirectory(root, controller.signal)
+    // Abort after the walk has started but while directory entries remain;
+    // throwIfAborted at the next walk boundary must end the scan.
+    controller.abort()
+    await expect(pending).rejects.toThrow()
+  })
+
   it('reads read-only fixtures while a source file stays open under a read-only flag', async () => {
     const root = makeFixtureTree()
     const all = walkFiles(root).filter((p) => path.extname(p).toLowerCase() !== '.txt')

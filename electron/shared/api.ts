@@ -77,12 +77,16 @@ export interface SelightHandlers {
   deleteFolder(folderId: number): Promise<number>
 
   importDirectory(batchId: number, rootPath: string): Promise<ImportResult>
+  /** Abort an in-flight discovery scan and drop queued enrichment work. */
+  cancelImport(): Promise<void>
   listView(batchId: number, view: View): Promise<PhotoRow[]>
   counts(batchId: number): Promise<Counts>
   mediaUrl(photoId: number, kind: MediaKind): Promise<string>
   markSelection(ids: number[]): Promise<void>
   /** Clear a placeholder artifact and re-enqueue generation for manual retry. */
   retryMedia(photoId: number, kind: MediaKind): Promise<void>
+  /** Remove orphaned/missing cache artifacts; returns the deleted file count. */
+  cleanupMediaCache(): Promise<{ removed: number }>
 
   assign(photoIds: number[], folderId: number): Promise<number>
   trash(photoIds: number[]): Promise<number>
@@ -135,11 +139,13 @@ export const IPC_CHANNELS = {
   folderRename: 'selight:folder:rename',
   folderDelete: 'selight:folder:delete',
   photoImport: 'selight:photo:import',
+  importCancel: 'selight:import:cancel',
   photoListView: 'selight:photo:list-view',
   photoCounts: 'selight:photo:counts',
   photoMediaUrl: 'selight:photo:media-url',
   photoMarkSelection: 'selight:photo:mark-selection',
   mediaRetry: 'selight:media:retry',
+  mediaCacheCleanup: 'selight:media:cache-cleanup',
   classifyAssign: 'selight:classify:assign',
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',
