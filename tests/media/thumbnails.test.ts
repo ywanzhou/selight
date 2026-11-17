@@ -137,12 +137,61 @@ describe('ensureThumbnail sharp pipeline', () => {
 
   it('accepts upper-case extensions (.JPG, .WEBP)', async () => {
     const cacheDir = makeCacheDir()
-    const { photo: p } = await writeSource('UPPER.JPG', await makeImage({ ext: '.jpg' }), {
+    const { photo: jpg } = await writeSource('UPPER.JPG', await makeImage({ ext: '.jpg' }), {
       ext: '.JPG'
     })
+    const jpgResult = await ensureThumbnail(jpg, cacheDir)
+    expect(jpgResult.placeholder).toBe(false)
+    expect((await sharp(jpgResult.path).metadata()).width).toBe(320)
+
+    const { photo: webp } = await writeSource('UPPER.WEBP', await makeImage({ ext: '.webp' }), {
+      ext: '.WEBP'
+    })
+    const webpResult = await ensureThumbnail(webp, makeCacheDir())
+    expect(webpResult.placeholder).toBe(false)
+    expect((await sharp(webpResult.path).metadata()).width).toBe(320)
+  })
+
+  it('accepts an upper-case RAW extension through the extracted-preview branch', async () => {
+    const cacheDir = makeCacheDir()
+    const previewDir = makeCacheDir()
+    const extracted = path.join(previewDir, '42.jpg')
+    await fs.promises.writeFile(extracted, await makeImage({ ext: '.jpg' }))
+    const p = photo({ ext: '.ARW' })
+
+    const result = await ensureThumbnail(p, cacheDir, {
+      previewDir,
+      reader: { ensureRawPreview: async () => extracted }
+    })
+    expect(result.placeholder).toBe(false)
+    expect((await sharp(result.path).metadata()).width).toBe(320)
+  })
+
+  it('degrades a non-image file with an image extension to placeholder + sidecar', async () => {
+    const cacheDir = makeCacheDir()
+    const { photo: p } = await writeSource('fake.jpg', Buffer.from('plain text, not an image'))
+
+    const result = await ensureThumbnail(p, cacheDir)
+    expect(result).toEqual({ path: path.join(cacheDir, '42.jpg'), placeholder: true })
+    expect(fs.existsSync(`${result.path}.placeholder`)).toBe(true)
+    expect(fs.readFileSync(result.path)).toEqual(PLACEHOLDER_JPEG_BYTES)
+  })
+
+  it('pins the failOn:none contract: a mid-file truncated JPEG still yields a usable thumbnail', async () => {
+    // Explicit decision, not an accident: failOn:'none' trades strict rejection
+    // for a recoverable partial image over a permanent placeholder. v1 has no
+    // retry flow (backlog I7), so this behavior is pinned here instead of being
+    // discovered from a half-rendered grid cell.
+    const cacheDir = makeCacheDir()
+    const full = await makeImage({ ext: '.jpg' })
+    const { photo: p } = await writeSource(
+      'truncated-middle.jpg',
+      full.subarray(0, Math.floor(full.length / 2))
+    )
 
     const result = await ensureThumbnail(p, cacheDir)
     expect(result.placeholder).toBe(false)
+    expect(fs.existsSync(`${result.path}.placeholder`)).toBe(false)
     const meta = await sharp(result.path).metadata()
     expect(meta.width).toBe(320)
   })

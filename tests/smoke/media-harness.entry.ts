@@ -196,7 +196,8 @@ app.whenReady().then(async () => {
       sampled: sample.length,
       sharpControl,
       fallbackPlaceholder: ghostOk,
-      sharpConcurrency: 1,
+      // Read back the live setting instead of hardcoding the configured value.
+      sharpConcurrency: sharp.concurrency(),
       decodeMs: {
         p50: Math.round(percentile(durations, 0.5) * 10) / 10,
         p95: Math.round(percentile(durations, 0.95) * 10) / 10,

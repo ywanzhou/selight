@@ -133,10 +133,44 @@ describe('ExiftoolReader.ensureRawPreview', () => {
     expect(written.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
     const meta = await sharp(written).metadata()
     expect(meta.width).toBeLessThan(meta.height!)
+    // Rotation is a real re-encode: it must not silently use sharp's default
+    // quality 80 (the legacy jpeg-autorotate path encoded at quality 100).
+    // Same-version sharp with identical inputs is deterministic, so the q80
+    // reference is byte-stable.
+    const q80Reference = await sharp(source).rotate(90).jpeg().toBuffer()
+    expect(written.equals(q80Reference)).toBe(false)
     expect(fake.extract).toHaveBeenCalledTimes(1)
 
     const cached = await reader.ensureRawPreview(photo, cacheDir)
     expect(cached).toBe(expected)
+    expect(fake.extract).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes the extracted bytes untouched when orientation needs no rotation', async () => {
+    const cacheDir = makeCacheDir()
+    // angle 0 must be a lossless passthrough: the embedded JPEG is the camera's
+    // own preview and a second JPEG encode would only add generation loss.
+    const source = await sharp({
+      create: {
+        width: 640,
+        height: 480,
+        channels: 3,
+        background: { r: 10, g: 20, b: 30, alpha: 1 }
+      }
+    })
+      .jpeg()
+      .toBuffer()
+    const fake = makeFake({ orientation: 1, thumbnail: () => source })
+    const reader = new ExiftoolReader({
+      read: fake.read,
+      extractBinaryTagToBuffer: fake.extract
+    })
+
+    const out = await reader.ensureRawPreview(
+      { id: 9, absPath: 'x.arw', orientation: 1 },
+      cacheDir
+    )
+    expect(fs.readFileSync(out)).toEqual(source)
     expect(fake.extract).toHaveBeenCalledTimes(1)
   })
 
