@@ -70,7 +70,7 @@ npm run pack:win
 | 渲染层 | React 19 + TypeScript（strict） |
 | 数据 | better-sqlite3，同步事务，库文件位于应用 `userData/selight.db` |
 | EXIF / RAW | exiftool-vendored（自带二进制，离线可用） |
-| 缩略图 | Electron nativeImage + 隐藏 Blink helper 解码 WebP，jpeg-autorotate 烘焙方向 |
+| 缩略图 | sharp（libvips 预编译二进制）统一解码，EXIF 方向烘焙，RAW 走 exiftool 内嵌预览 |
 | 虚拟化 | react-window |
 | 测试 | Vitest（领域逻辑 / IPC 契约 / 媒体管线 / 真实 ARW 冒烟 harness） |
 

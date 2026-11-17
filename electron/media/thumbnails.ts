@@ -1,13 +1,18 @@
-import { nativeImage, type NativeImage } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
+import sharp from 'sharp'
 import type { PhotoRow } from '../domain/photos'
 import { ExiftoolReader } from './rawPreview'
-import { rotateJpegBuffer } from './orientation'
 import { RAW_EXTENSIONS } from './formats'
 import { MediaQueue } from './queue'
-import { decodeWebpThumbnail } from './blinkThumbnail'
+
+// One libvips thread per operation: the MediaQueue supplies cross-photo
+// concurrency, so per-image thread pools would only oversubscribe the CPU.
+// sharp.cache files:0 mirrors Immich's production setting and prevents
+// cached file handles from piling up across thousands of small operations.
+sharp.concurrency(1)
+sharp.cache({ files: 0 })
 
 const THUMB_WIDTH = 320
 const JPEG_QUALITY = 85
@@ -83,6 +88,16 @@ async function fallbackPlaceholder(
   return { path: out, placeholder: true }
 }
 
+// Shared 320px-inside JPEG encoding: shrink-on-load happens during decode, so
+// the full-resolution RGBA buffer is never held in memory.
+function encodeThumbnail(input: string | Buffer): Promise<Buffer> {
+  return sharp(input, { failOn: 'none' })
+    .rotate()
+    .resize(THUMB_WIDTH, THUMB_WIDTH, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: JPEG_QUALITY })
+    .toBuffer()
+}
+
 export async function ensureThumbnail(
   photo: ThumbnailPhoto,
   cacheDir: string,
@@ -102,48 +117,29 @@ export async function ensureThumbnail(
 
   try {
     const ext = photo.ext.toLowerCase()
-
-    if (ext === '.webp') {
-      // Electron 44 nativeImage cannot decode webp (corpus 20/20 failures): route webp
-      // through the hidden Blink helper. It already returns a width-320 JPEG, so write
-      // the bytes directly instead of re-encoding through nativeImage.
-      const jpeg = await decodeWebpThumbnail(photo.absPath)
-      await atomicWrite(out, jpeg)
-      await removePlaceholderMarker(out)
-      return { path: out, placeholder: false }
-    }
-
-    let image: NativeImage
+    let bytes: Buffer
 
     if (RAW_EXTENSIONS.has(ext)) {
       if (!deps?.previewDir) {
         throw new Error('previewDir is required to build RAW thumbnails')
       }
       const reader = deps.reader ?? new ExiftoolReader()
+      // ensureRawPreview already extracted and orientation-rotated the embedded
+      // JPEG, so this pass only downscales; no second rotate().
       const preview = await reader.ensureRawPreview(photo, deps.previewDir)
-      image = nativeImage.createFromBuffer(await fs.readFile(preview))
-    } else if ((ext === '.jpg' || ext === '.jpeg') && photo.orientation !== 1) {
-      // createThumbnail ignores EXIF orientation, so rotate the JPEG bytes first.
-      const rotated = await rotateJpegBuffer(await fs.readFile(photo.absPath), photo.orientation)
-      image = nativeImage.createFromBuffer(rotated)
+      bytes = await encodeThumbnail(await fs.readFile(preview))
     } else {
-      // Electron 44's API: scales to fit inside the Size while preserving aspect ratio.
-      image = await nativeImage.createThumbnailFromPath(photo.absPath, {
-        width: THUMB_WIDTH,
-        height: THUMB_WIDTH
-      })
+      // .rotate() with no angle honors the EXIF Orientation tag during decode
+      // and bakes the corrected orientation into the output pixels.
+      bytes = await encodeThumbnail(photo.absPath)
     }
 
-    const resized = image.resize({ width: THUMB_WIDTH })
-    if (resized.isEmpty()) {
-      throw new Error(`nativeImage decoded an empty image for ${photo.absPath}`)
-    }
-    await atomicWrite(out, resized.toJPEG(JPEG_QUALITY))
+    await atomicWrite(out, bytes)
     // A successful regeneration clears any marker left by an earlier failure.
     await removePlaceholderMarker(out)
     return { path: out, placeholder: false }
   } catch (err) {
-    // Any failure — RawPreviewError, jpeg-js rotation error, fs SystemError — degrades
+    // Any failure — RawPreviewError, sharp decode error, fs SystemError — degrades
     // to a placeholder instead of breaking the queue or the renderer.
     return fallbackPlaceholder(out, photo.id, err)
   }

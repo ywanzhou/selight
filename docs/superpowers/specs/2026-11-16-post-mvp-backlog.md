@@ -13,7 +13,7 @@
 
 5. **I5 照片宽高入库**：exiftool read() 已返回 ImageWidth/ImageHeight，扫描期写入 photos.width/height，补全 spec §4.3 信息条的尺寸项（当前该条件恒假）。
 6. **I7 占位缩略图重试**：提供"重试生成"动作（删 `<id>.jpg`+sidecar 后重新 enqueue），并顺手把 sidecar 写序调整为"先 marker 后图、先删 marker 后 rename"。
-7. **exiftool 扫描耗时优化**：现状 52.2s/1874（stay-open 单例串行 read 往返，后台不阻塞 UI）。webp 可免 exiftool（Blink imageOrientation:'from-image' 自带方向），jpg 仍需；优化后预期降幅明显。
+7. **exiftool 扫描耗时优化**：现状 52.2s/1874（stay-open 单例串行 read 往返，后台不阻塞 UI）。webp 可免 exiftool（Blink imageOrientation:'from-image' 自带方向），jpg 仍需；优化后预期降幅明显。**（2026-11-17 更新：一期后 Blink 已删；二期方案改为直读格式统一走 sharp.metadata 读方向、exiftool 只服务 RAW，配合有界并发池，见 sharp 设计文档 5.1。）**
 8. **IPC 错误通知组件**：统一 window.alert/confirm 为 macOS 风格通知；错误原文直显改中文映射（FolderNameConflictError 等已有分支）。
 9. **缓存 GC**：missing 占位死产物、长期失效缓存的清理策略。
 
@@ -21,8 +21,8 @@
 
 - listBatches 加 `, id DESC` 全序兜底；renameFolder 未知 id 静默 no-op 补钉死测试；openBatch 未知 id 改专属错误名。
 - openDatabase catch 收窄到 SQLITE_NOTADB/SQLITE_CORRUPT；user_version 并入建表事务；损坏备份内容断言补强。
-- isAllowedAbsPath 死导出接入生产白名单或删除；jpeg-js 提为显式 devDependency（当前是 jpeg-autorotate 传递依赖，harness 直接 import）。
-- Blink helper：连续超时后 destroy 重建；helper 路由 containment node 负向测试；dev 模式 helper URL 首次 dev 联调手工关；卡死窗口回收。
+- isAllowedAbsPath 死导出接入生产白名单或删除；jpeg-js 提为显式 devDependency（当前是 jpeg-autorotate 传递依赖，harness 直接 import）。**（2026-11-17 随 Blink 子系统删除而失效：isAllowedAbsPath 所在的 blinkProtocol.ts 已删，jpeg-js/jpeg-autorotate 已移出依赖树。）**
+- Blink helper：连续超时后 destroy 重建；helper 路由 containment node 负向测试；dev 模式 helper URL 首次 dev 联调手工关；卡死窗口回收。**（2026-11-17 整体 wontfix→已消除：Blink helper 被 sharp 管线取代，相关文件全部删除。）**
 - Harness 债：两个 launcher 加 `child.on('error')`；app.exit 前显式清理 %TEMP% 目录或改 app.quit；空样本加 `--strict` 开关；samples 不可读时按 failures 语义 skip；SUPPORTED_EXT 从 formats.ts 同源导出；harness 进 release checklist。
 - 渲染层：RecoveryDialog onClose useCallback；右键菜单 focus trap；重命名切换丢草稿；回收站拖到文件夹加 toast；showError 抽公共模块；saveSession 恢复视图一帧 inbox 闪烁；ExportDialog aria-valuemax 首帧与 progress 首事件时序；failures 字符串结构化；文件大小 KB/MB 自适应；未消费图标（Grid/List/Search）清理；selection 只写镜像清理；HANDLER_NAMES 由 IPC_CHANNELS 派生。
 - 预览尺寸互换断言随 samples/ 激活自动闭环（harness 已写好）。
@@ -60,8 +60,8 @@ mac build 配置+解包 glob+icns（能出未签名 dmg）→ hiddenInset 布局
 
 ## 用户实测问题（2026-11-16 macOS 真机走查）
 
-1. **大批量导入卡死（900+ 张，无分页）**：`listPhotos`（electron/domain/photos.ts:134）无 LIMIT，整个视图一次性经 IPC 全量进渲染层 state；react-window 只虚拟化了 DOM，缩略图任务仍按全量入队（MediaQueue 并发 2，JPG 走整文件读取+jpeg-js 解码旋转，webp 走 Blink helper IPC 往返），导入扫描本身 exiftool stay-open 串行约 28ms/张（900 张约 25s 主进程繁忙）。方向：查询分页/窗口化 + 缩略图按需生成（仅视口附近 enqueue）+ 导入进度可取消；先 profile 确认卡点是 IPC 全量、主进程解码还是 exiftool 扫描。与中优先 #8 相关。
-2. **单张超大尺寸照片内存卡死**：两处全尺寸解码均无尺寸护栏——(a) 主进程 `rotateJpegBuffer`（media/orientation.ts:17）调 jpeg-autorotate 的 rotateBuffer，jpeg-js 把整张 JPEG 解码成 RGBA 裸缓冲（1 亿像素约 400MB+），随后 nativeImage 再解码一遍，队列并发 2 可叠加 OOM；(b) 渲染层 PreviewPane 的 `<img src=selight://photo/id>` 由 resolve.ts 直接返回**原文件**全尺寸字节，Blink 解码同样吃满渲染进程内存，webp 走 Blink helper 的 createImageBitmap 同理。方向：导入期读 width/height（本 backlog I5 已是前置）、超阈值走降采样/分区解码、预览改为受限尺寸的 preview 副本而非原图。
+1. **大批量导入卡死（900+ 张，无分页）**：`listPhotos`（electron/domain/photos.ts:134）无 LIMIT，整个视图一次性经 IPC 全量进渲染层 state；react-window 只虚拟化了 DOM，缩略图任务仍按全量入队（MediaQueue 并发 2，JPG 走整文件读取+jpeg-js 解码旋转，webp 走 Blink helper IPC 往返），导入扫描本身 exiftool stay-open 串行约 28ms/张（900 张约 25s 主进程繁忙）。方向：查询分页/窗口化 + 缩略图按需生成（仅视口附近 enqueue）+ 导入进度可取消；先 profile 确认卡点是 IPC 全量、主进程解码还是 exiftool 扫描。与中优先 #8 相关。**（2026-11-17 profile 实测更新，见 `2026-11-17-media-pipeline-sharp-design.md`：1874 文件实测 fs 遍历仅 136ms，exiftool 串行扫描 52.6s 占 99%（JS 层 for-await 把 exiftool 多进程池饿死成单任务，并发 4 可降到 10s）；IPC 全量下发仅 713KB/5ms，排除分页必要性。同日完成一期：sharp 替换三管线，缩略图真机 p50 15.8ms/p95 21.5ms（旧 Blink p50 26ms）。二期：发现/富化分离 + 按需队列；三期：2048 预览层。）**
+2. **单张超大尺寸照片内存卡死**：两处全尺寸解码均无尺寸护栏——(a) 主进程 `rotateJpegBuffer`（media/orientation.ts:17）调 jpeg-autorotate 的 rotateBuffer，jpeg-js 把整张 JPEG 解码成 RGBA 裸缓冲（1 亿像素约 400MB+），随后 nativeImage 再解码一遍，队列并发 2 可叠加 OOM；(b) 渲染层 PreviewPane 的 `<img src=selight://photo/id>` 由 resolve.ts 直接返回**原文件**全尺寸字节，Blink 解码同样吃满渲染进程内存，webp 走 Blink helper 的 createImageBitmap 同理。方向：导入期读 width/height（本 backlog I5 已是前置）、超阈值走降采样/分区解码、预览改为受限尺寸的 preview 副本而非原图。**（2026-11-17 一期部分缓解：jpeg-autorotate/jpeg-js、nativeImage、Blink 全尺寸 createImageBitmap 三条路径已全部删除，缩略图改 libvips shrink-on-load（resize 在解码期生效，不再持有全尺寸 RGBA）；harness 实测进程 maxRSS ≈ 320MB（20 张样本，并发 1，超大图专项 RSS 仍待三期用 1 亿像素夹具补测）。渲染层原图直出未变，三期 2048 预览副本完成后本条才能关闭。）**
 3. **"导出的是配置文件而非分类产物"（待复现，与代码现状不符）**：现 `exportBatch`（electron/exporter.ts:69）实际是 `copyFile` 真实拷贝——按文件夹名在输出目录建子目录，只导出 status='folder' 的照片，inbox/回收站不导出，带进度与 failures。用户观察到的"配置文件"疑似：(a) userData 下自动保存的 session.json 被误认为导出物；(b) 没有任何已入文件夹的照片时导出结果为空目录。需与用户复现确认实际操作路径后再定方案（若诉求是"导出清单/配置"则是新需求，若为空目录则属 UX 提示问题：导出前应提示将拷贝 0 张）。**（2026-11-17 部分完成：空导出路径已封死——`counts.folder === 0` 时工具栏导出按钮禁用，外层 span 挂 title 说明原因；"配置文件"复现疑问仍待用户确认操作路径。）**
 4. **新建批次支持自定义命名**：后端已就绪——`createBatch(db, name?)`（domain/batches.ts:36）与 IPC batchCreate 都透传可选 name，缺省才回退 `localDate()`。缺口纯在 UI：App.tsx:30 与 store.ts:143 的 `createBatch()` 均未传参。方向：复用 InlineNameInput 做命名输入（允许留空走日期默认），store/preload 签名补可选 name 参数。**（2026-11-17 已完成：新增 CreateBatchButton（工具栏与空状态页复用），InlineNameInput 加 allowBlank 支持留空走日期默认，store thunk 透传可选 name；preload/domain 本已就绪。同日补齐批次重命名：renameBatch 全链路 + 工具栏铅笔按钮原位内联编辑，不碰 last_opened_at 以保下拉排序；批次名无唯一约束（日期默认名允许重复），故不做冲突校验。）**
 
