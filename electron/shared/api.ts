@@ -81,6 +81,8 @@ export interface SelightHandlers {
   counts(batchId: number): Promise<Counts>
   mediaUrl(photoId: number, kind: MediaKind): Promise<string>
   markSelection(ids: number[]): Promise<void>
+  /** Clear a placeholder artifact and re-enqueue generation for manual retry. */
+  retryMedia(photoId: number, kind: MediaKind): Promise<void>
 
   assign(photoIds: number[], folderId: number): Promise<number>
   trash(photoIds: number[]): Promise<number>
@@ -137,6 +139,7 @@ export const IPC_CHANNELS = {
   photoCounts: 'selight:photo:counts',
   photoMediaUrl: 'selight:photo:media-url',
   photoMarkSelection: 'selight:photo:mark-selection',
+  mediaRetry: 'selight:media:retry',
   classifyAssign: 'selight:classify:assign',
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',

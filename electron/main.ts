@@ -8,6 +8,7 @@ import { ExiftoolReader } from './media/rawPreview'
 import { createThumbnailQueue } from './media/thumbnails'
 import { createPreviewQueue } from './media/previews'
 import { EnrichmentService } from './media/enrich'
+import { retryMediaGeneration } from './media/retry'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -73,7 +74,7 @@ app.whenReady().then(() => {
   const roots = { thumbDir, previewDir }
 
   const exifReader = new ExiftoolReader()
-  thumbQueue = createThumbnailQueue(
+  const thumbs = createThumbnailQueue(
     db,
     roots,
     exifReader,
@@ -81,7 +82,7 @@ app.whenReady().then(() => {
       mainWindow?.webContents.send(IPC_CHANNELS.mediaReady, { id, kind: 'thumb', ok })
     }
   )
-  previewQueue = createPreviewQueue(
+  const previews = createPreviewQueue(
     db,
     roots,
     exifReader,
@@ -89,13 +90,15 @@ app.whenReady().then(() => {
       mainWindow?.webContents.send(IPC_CHANNELS.mediaReady, { id, kind: 'photo', ok })
     }
   )
+  thumbQueue = thumbs
+  previewQueue = previews
   // A 404 on either route enqueues on-demand generation; each queue dedupes
   // rapid repeated requests for the same id.
   registerMediaProtocol(
     db,
     roots,
-    (id) => thumbQueue?.enqueue([id]),
-    (id) => previewQueue?.enqueue([id])
+    (id) => thumbs.enqueue([id]),
+    (id) => previews.enqueue([id])
   )
   enrichment = new EnrichmentService(db, exifReader, {
     onProgress: (done, total) => {
@@ -107,6 +110,12 @@ app.whenReady().then(() => {
     db,
     thumbQueue,
     enrichment,
+    retry: {
+      retryThumb: (id) =>
+        retryMediaGeneration(roots, 'thumb', id, { thumb: thumbs, photo: previews }),
+      retryPreview: (id) =>
+        retryMediaGeneration(roots, 'photo', id, { thumb: thumbs, photo: previews })
+    },
     mediaRoots: roots,
     sessionStore,
     onExportProgress: (done, total) => {
@@ -162,6 +171,10 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC_CHANNELS.photoMarkSelection, (_event, ids: number[]) =>
     handlers.markSelection(ids)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.mediaRetry,
+    (_event, photoId: number, kind: MediaKind) => handlers.retryMedia(photoId, kind)
   )
 
   ipcMain.handle(

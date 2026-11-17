@@ -40,6 +40,7 @@ const HANDLER_NAMES = [
   'counts',
   'mediaUrl',
   'markSelection',
+  'retryMedia',
   'assign',
   'trash',
   'restore',
