@@ -56,8 +56,7 @@ function addPhoto(db: Database, batchId: number, absPath: string): number {
     filename: path.basename(absPath),
     ext: path.extname(absPath),
     sizeBytes: 1024,
-    mtime: 1_700_000_000_000,
-    orientation: 1
+    mtime: 1_700_000_000_000
   }
   return upsertPhoto(db, input).row.id
 }

@@ -56,6 +56,21 @@ const api: SelightApi = {
     const listener = (_event: unknown, payload: { done: number; total: number }) => cb(payload)
     ipcRenderer.on(IPC_CHANNELS.exportProgress, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.exportProgress, listener)
+  },
+
+  onEnrichProgress: (cb) => {
+    const listener = (_event: unknown, payload: { done: number; total: number }) => cb(payload)
+    ipcRenderer.on(IPC_CHANNELS.enrichProgress, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.enrichProgress, listener)
+  },
+
+  onMediaReady: (cb) => {
+    const listener = (
+      _event: unknown,
+      payload: { id: number; kind: 'thumb'; ok: boolean }
+    ) => cb(payload)
+    ipcRenderer.on(IPC_CHANNELS.mediaReady, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.mediaReady, listener)
   }
 }
 

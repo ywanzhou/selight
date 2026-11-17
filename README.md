@@ -20,7 +20,7 @@
 - **💾 关掉重开接着干，可续**：批次、待分类池、文件夹、回收站、导入来源、当前视图全部持久化，下次打开恢复完整现场
 - **🗂️ 批次隔离多场次**：一次拍摄一个批次，互不干扰，历史批次随时切回看，工具栏可直接重命名；也可删除整个批次（只删库内记录与缩略图缓存，原文件不动，此操作不可撤销）
 - **📷 RAW 与 EXIF 方向**：直读 JPG/JPEG/PNG/WEBP；ARW/CR2/CR3/NEF/DNG/RAF/RW2/ORF/PEF/SRW 提取内嵌预览，EXIF Orientation 自动烘焙转正，竖拍不会横置
-- **🪶 两千张不卡**：react-window 虚拟化网格只渲染可见区域，扫描与缩略图在后台队列按可见优先级生成
+- **🪶 两千张不卡**：导入只做文件发现，秒级返回；EXIF/尺寸富化在后台有界并发池完成，react-window 虚拟化网格只渲染可见区域，缩略图按视口优先级按需生成、404 自动补队
 - **📤 非破坏式导出**：按文件夹把**原文件复制**到输出目录（RAW 复制原 RAW），回收站不导出，文件名冲突自动加 `(1)` 后缀，绝不覆盖
 
 ## ⌨️ 快捷键
@@ -69,8 +69,9 @@ npm run pack:win
 | 壳 | Electron 44 + electron-vite |
 | 渲染层 | React 19 + TypeScript（strict） |
 | 数据 | better-sqlite3，同步事务，库文件位于应用 `userData/selight.db` |
-| EXIF / RAW | exiftool-vendored（自带二进制，离线可用） |
+| EXIF / RAW | exiftool-vendored（自带二进制，离线可用），仅服务 RAW 富化与内嵌预览 |
 | 缩略图 | sharp（libvips 预编译二进制）统一解码，EXIF 方向烘焙，RAW 走 exiftool 内嵌预览 |
+| 后台任务 | EnrichmentService 单例（直读 4 / RAW 2 双池、去重、聚合进度），缩略图 MediaQueue 视口优先 |
 | 虚拟化 | react-window |
 | 测试 | Vitest（领域逻辑 / IPC 契约 / 媒体管线 / 真实 ARW 冒烟 harness） |
 

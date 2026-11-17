@@ -43,6 +43,20 @@ export interface ExportProgressEvent {
   total: number
 }
 
+// Main → renderer: aggregated EnrichmentService progress across all submissions.
+export interface EnrichProgressEvent {
+  done: number
+  total: number
+}
+
+// Main → renderer: one thumbnail finished generation. ok:false means a permanent
+// placeholder was written and no further retry will happen automatically.
+export interface MediaReadyEvent {
+  id: number
+  kind: 'thumb'
+  ok: boolean
+}
+
 // Request/response surface, wrapped 1:1 by ipcRenderer.invoke and implemented by the
 // pure createHandlers factory (which has no webContents and therefore cannot push;
 // export progress leaves the factory through an injected callback). Batch-scoped calls
@@ -100,6 +114,10 @@ export interface SelightApi extends SelightHandlers {
   onDbRecovered(cb: () => void): () => void
   // Subscribe to export progress while an exportBatch invoke is in flight.
   onExportProgress(cb: (event: ExportProgressEvent) => void): () => void
+  // Subscribe to background enrichment progress (aggregated across batches).
+  onEnrichProgress(cb: (event: EnrichProgressEvent) => void): () => void
+  // Subscribe to per-photo thumbnail readiness for on-demand 404 retries.
+  onMediaReady(cb: (event: MediaReadyEvent) => void): () => void
 }
 
 // Channel names shared by preload (invoke/on) and main (handle/send), so they cannot drift.
@@ -133,5 +151,8 @@ export const IPC_CHANNELS = {
   // Main → renderer progress events; no invoke handler is registered for this channel.
   exportProgress: 'selight:export:progress',
   // Main → renderer notice only; no invoke handler is registered for this channel.
-  dbRecovered: 'selight:db:recovered'
+  dbRecovered: 'selight:db:recovered',
+  // Main → renderer enrichment/media events; push-only, no invoke handler.
+  enrichProgress: 'selight:enrich:progress',
+  mediaReady: 'selight:media:ready'
 } as const

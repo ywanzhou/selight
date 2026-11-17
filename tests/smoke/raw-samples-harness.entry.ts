@@ -23,7 +23,6 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { importScanned, scanDirectory } from '../../electron/scanner'
-import { ExiftoolReader } from '../../electron/media/rawPreview'
 import {
   ensureThumbnail,
   PLACEHOLDER_JPEG_BYTES,
@@ -31,6 +30,8 @@ import {
 } from '../../electron/media/thumbnails'
 import { registerMediaProtocol } from '../../electron/media/protocol'
 import { RAW_EXTENSIONS } from '../../electron/media/formats'
+import { EnrichmentService } from '../../electron/media/enrich'
+import { ExiftoolReader } from '../../electron/media/rawPreview'
 
 const SAMPLES = path.resolve(__dirname, '..', '..', 'samples')
 const DIRECT_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
@@ -98,21 +99,28 @@ app.whenReady().then(async () => {
         .run(batchId, SAMPLES).lastInsertRowid
     )
 
-    const reader = new ExiftoolReader()
-    const scan = await scanDirectory(SAMPLES, reader)
+    const scan = await scanDirectory(SAMPLES)
     if (scan.failures.length !== 0) fail(`scan failures: ${scan.failures.join('; ')}`)
     const imported = importScanned(db, batchId, sourceId, scan.files)
     if (imported.added !== sampleFiles.length) {
       fail(`imported ${imported.added} rows but disk holds ${sampleFiles.length} files`)
     }
 
-    // Same registration production main.ts uses; routes resolve against the temp
-    // roots and this harness DB only.
-    registerMediaProtocol(
-      db,
-      { thumbDir, previewDir },
-      path.join(__dirname, '../renderer')
+    // Discovery is fs-only; run the production enrichment service so rows carry
+    // real EXIF orientation/dimensions before the thumbnail/route assertions.
+    const enrichment = new EnrichmentService(db, new ExiftoolReader())
+    enrichment.submit(
+      (db.prepare('SELECT id FROM photos ORDER BY id').all() as { id: number }[]).map(
+        (r) => r.id
+      )
     )
+    await enrichment.whenIdle()
+    enrichment.stop()
+
+    // Same registration production main.ts uses; routes resolve against the temp
+    // roots and this harness DB only. The harness pre-generates every thumbnail,
+    // so the 404 enqueue seam can stay a no-op.
+    registerMediaProtocol(db, { thumbDir, previewDir }, () => undefined)
 
     const rows = db
       .prepare(

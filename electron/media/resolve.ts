@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
+import type { MediaKind } from '../shared/api'
 import { RAW_EXTENSIONS } from './formats'
 
 export interface MediaRoots {
@@ -8,30 +9,28 @@ export interface MediaRoots {
   previewDir: string
 }
 
-export type MediaKind = 'thumb' | 'photo'
+// Discriminated result so the protocol layer can distinguish a security
+// rejection (403, no enqueue) from a cache miss the thumbnail queue should
+// fill on demand (404 + enqueue + media-ready notification).
+export type ResolveResult =
+  | { ok: true; file: string }
+  | { ok: false; reason: 'forbidden' }
+  | { ok: false; reason: 'not-generated'; id: number }
 
-interface PhotoRecord {
-  abs_path: string
-  ext: string
-  missing: number
-}
-
-// Integers or digit-only strings only. Anything containing '/', '..', '\' or
-// other punctuation is rejected before it ever touches the filesystem.
 function parseId(photoId: number | string): number | null {
   if (typeof photoId === 'number') {
     return Number.isInteger(photoId) && photoId > 0 ? photoId : null
   }
   if (!/^\d+$/.test(photoId)) return null
   const id = Number(photoId)
-  return Number.isSafeInteger(id) && id > 0 ? id : null
+  return id > 0 ? id : null
 }
 
-// True when candidate is root itself or a path beneath it; a '..' escape or an
-// absolute different drive resolves to a path.relative() starting with '..'.
-export function isInside(root: string, candidate: string): boolean {
-  const rel = path.relative(root, candidate)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+interface PhotoRecord {
+  id: number
+  abs_path: string
+  ext: string
+  missing: number
 }
 
 export function resolveMediaPath(
@@ -39,34 +38,44 @@ export function resolveMediaPath(
   roots: MediaRoots,
   kind: MediaKind,
   photoId: number | string
-): string | null {
+): ResolveResult {
   const id = parseId(photoId)
-  if (id === null) return null
-
-  const thumbDir = path.resolve(roots.thumbDir)
-  const previewDir = path.resolve(roots.previewDir)
+  if (id === null) return { ok: false, reason: 'forbidden' }
+  if (kind !== 'thumb' && kind !== 'photo') {
+    return { ok: false, reason: 'forbidden' }
+  }
 
   const row = db
-    .prepare('SELECT abs_path, ext, missing FROM photos WHERE id = ?')
+    .prepare('SELECT id, abs_path, ext, missing FROM photos WHERE id = ?')
     .get(id) as PhotoRecord | undefined
-  if (row === undefined || row.missing === 1) return null
+  if (row === undefined || row.missing === 1) {
+    return { ok: false, reason: 'forbidden' }
+  }
 
   if (kind === 'thumb') {
-    // Thumbnails are normalized JPEGs keyed by photo id; containment plus a
-    // registered, present row is the whole authorization rule.
-    const candidate = path.resolve(thumbDir, `${id}.jpg`)
-    return isInside(thumbDir, candidate) && fs.existsSync(candidate) ? candidate : null
+    const candidate = path.resolve(roots.thumbDir, `${id}.jpg`)
+    // Containment: the numeric id can only ever address a file directly in thumbDir.
+    if (!candidate.startsWith(path.resolve(roots.thumbDir) + path.sep)) {
+      return { ok: false, reason: 'forbidden' }
+    }
+    return fs.existsSync(candidate)
+      ? { ok: true, file: candidate }
+      : { ok: false, reason: 'not-generated', id }
   }
-  if (kind !== 'photo') return null
 
   if (RAW_EXTENSIONS.has(row.ext.toLowerCase())) {
-    // RAW sources are never served directly: only the extracted preview cache.
-    const candidate = path.resolve(previewDir, `${id}.jpg`)
-    return isInside(previewDir, candidate) && fs.existsSync(candidate) ? candidate : null
+    const candidate = path.resolve(roots.previewDir, `${id}.jpg`)
+    if (!candidate.startsWith(path.resolve(roots.previewDir) + path.sep)) {
+      return { ok: false, reason: 'forbidden' }
+    }
+    return fs.existsSync(candidate)
+      ? { ok: true, file: candidate }
+      : { ok: false, reason: 'not-generated', id }
   }
 
-  // Direct-format source files may live anywhere, but the id must resolve to a
-  // registered, present row — arbitrary caller-supplied paths never reach here.
-  const candidate = path.resolve(row.abs_path)
-  return fs.existsSync(candidate) ? candidate : null
+  // Direct-read formats are still served from the read-only source in phase 2;
+  // phase 3 swaps this branch for the 2048px preview cache.
+  return fs.existsSync(row.abs_path)
+    ? { ok: true, file: path.resolve(row.abs_path) }
+    : { ok: false, reason: 'not-generated', id }
 }

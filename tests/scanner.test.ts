@@ -9,7 +9,6 @@ import { counts } from '../electron/domain/photos'
 import {
   importScanned,
   scanDirectory,
-  type ExifReader,
   type ScannedFile
 } from '../electron/scanner'
 
@@ -81,8 +80,6 @@ function makeFixtureTree(): string {
   return root
 }
 
-const fixedReader: ExifReader = { readOrientation: async () => 6 }
-
 function addSource(db: Database, batchId: number, absPath: string): number {
   const info = db
     .prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)')
@@ -102,10 +99,10 @@ function missingFlag(db: Database, absPath: string): number {
   ).missing
 }
 
-describe('scanDirectory', () => {
+describe('scanDirectory (fs-only discovery)', () => {
   it('recursively finds supported photos, filters extensions, and lowercases ext', async () => {
     const root = makeFixtureTree()
-    const { files, failures } = await scanDirectory(root, fixedReader)
+    const { files, failures } = await scanDirectory(root)
     const map = byPath(files)
     expect(failures).toEqual([])
 
@@ -129,33 +126,17 @@ describe('scanDirectory', () => {
     expect(files.every((f) => f.ext === f.ext.toLowerCase())).toBe(true)
     expect(map.has(path.join(root, 'note.txt'))).toBe(false)
 
+    // Discovery carries only filesystem metadata; orientation is no longer read here.
     const a = map.get(path.join(root, 'a.jpg'))!
     expect(a.filename).toBe('a.jpg')
     expect(a.sizeBytes).toBe(Buffer.byteLength('jpeg-a'))
     expect(Number.isInteger(a.mtime)).toBe(true)
-    expect(a.orientation).toBe(6)
-  })
-
-  it('falls back to orientation 1 when the reader fails, without aborting the scan', async () => {
-    const root = makeFixtureTree()
-    const failingReader: ExifReader = {
-      readOrientation: async (absPath) => {
-        if (absPath.endsWith('a.jpg')) throw new Error('exiftool boom')
-        return 8
-      }
-    }
-
-    const { files } = await scanDirectory(root, failingReader)
-    const map = byPath(files)
-
-    expect(files).toHaveLength(6)
-    expect(map.get(path.join(root, 'a.jpg'))?.orientation).toBe(1)
-    expect(map.get(path.join(root, 'b.JPG'))?.orientation).toBe(8)
+    expect('orientation' in a).toBe(false)
   })
 
   it('returns no files and records the skipped path when the root dir is unreadable', async () => {
     const root = path.join(tempDir('selight-scan-missing-'), 'does-not-exist')
-    const result = await scanDirectory(root, fixedReader)
+    const result = await scanDirectory(root)
     expect(result.files).toEqual([])
     expect(result.failures).toContain(root)
   })
@@ -167,7 +148,7 @@ describe('scanDirectory', () => {
     // Holding an 'r' handle is fine; any write-mode open by the scanner would fail on Windows.
     openFds.push(fs.openSync(path.join(root, 'a.jpg'), 'r'))
 
-    const { files } = await scanDirectory(root, fixedReader)
+    const { files } = await scanDirectory(root)
     expect(files).toHaveLength(6)
     expect(files.find((f) => f.filename === 'a.jpg')?.sizeBytes).toBe(
       Buffer.byteLength('jpeg-a')
@@ -182,19 +163,19 @@ describe('importScanned', () => {
     const batch = createBatch(db)
     const sourceId = addSource(db, batch.id, root)
 
-    const first = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
+    const first = importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
     expect(first).toEqual({ added: 6, updated: 0, missing: 0 })
     expect(
       (db.prepare('SELECT COUNT(*) AS n FROM photos').get() as { n: number }).n
     ).toBe(6)
 
-    const second = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
+    const second = importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
     expect(second).toEqual({ added: 0, updated: 6, missing: 0 })
 
     // Delete one fixture file: rescan no longer sees it, so the existing row goes missing.
     const gone = path.join(root, 'd.arw')
     fs.rmSync(gone)
-    const third = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
+    const third = importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
     expect(third.added).toBe(0)
     expect(third.missing).toBe(1)
     expect(missingFlag(db, gone)).toBe(1)
@@ -202,9 +183,35 @@ describe('importScanned', () => {
     // Ruling 9: the file reappears; a mtime/size-identical upsert cannot clear missing itself,
     // so importScanned must reset the flag for paths present in the scan before markMissing.
     writeFile(root, 'd.arw', 'raw-a')
-    const fourth = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
+    const fourth = importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
     expect(fourth).toEqual({ added: 0, updated: 6, missing: 0 })
     expect(missingFlag(db, gone)).toBe(0)
+  })
+
+  it('never overwrites enriched orientation/width/height on re-import', async () => {
+    const root = makeFixtureTree()
+    const db = tempDb()
+    const batch = createBatch(db)
+    const sourceId = addSource(db, batch.id, root)
+    importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
+
+    // Simulate a completed enrichment pass on one row.
+    const target = db
+      .prepare('SELECT id FROM photos WHERE abs_path = ?')
+      .get(path.join(root, 'a.jpg')) as { id: number }
+    db.prepare(
+      'UPDATE photos SET orientation = 6, width = 480, height = 640, updated_at = ? WHERE id = ?'
+    ).run(Date.now(), target.id)
+
+    // A later fs-only discovery/upsert must leave the enriched columns untouched.
+    importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
+    const row = db.prepare('SELECT * FROM photos WHERE id = ?').get(target.id) as Record<
+      string,
+      unknown
+    >
+    expect(row.orientation).toBe(6)
+    expect(row.width).toBe(480)
+    expect(row.height).toBe(640)
   })
 
   it('scopes missing marking/reset to the imported source in a multi-source batch', async () => {
@@ -220,18 +227,8 @@ describe('importScanned', () => {
     const sourceA = addSource(db, batch.id, rootA)
     const sourceB = addSource(db, batch.id, rootB)
 
-    importScanned(
-      db,
-      batch.id,
-      sourceA,
-      (await scanDirectory(rootA, fixedReader)).files
-    )
-    importScanned(
-      db,
-      batch.id,
-      sourceB,
-      (await scanDirectory(rootB, fixedReader)).files
-    )
+    importScanned(db, batch.id, sourceA, (await scanDirectory(rootA)).files)
+    importScanned(db, batch.id, sourceB, (await scanDirectory(rootB)).files)
     expect(counts(db, batch.id).total).toBe(4)
 
     // Re-import B after deleting b2: only B's deleted row may be flagged; source-A rows,
@@ -241,7 +238,7 @@ describe('importScanned', () => {
       db,
       batch.id,
       sourceB,
-      (await scanDirectory(rootB, fixedReader)).files
+      (await scanDirectory(rootB)).files
     )
     expect(reB).toMatchObject({ added: 0, updated: 1, missing: 1 })
     expect(missingFlag(db, path.join(rootA, 'a1.jpg'))).toBe(0)
@@ -258,7 +255,7 @@ describe('importScanned', () => {
       db,
       batch.id,
       sourceA,
-      (await scanDirectory(rootA, fixedReader)).files
+      (await scanDirectory(rootA)).files
     )
     expect(reA.missing).toBe(0)
     expect(missingFlag(db, path.join(rootA, 'a1.jpg'))).toBe(0)
@@ -275,7 +272,7 @@ describe('importScanned', () => {
     const batch = createBatch(db)
     const sourceId = addSource(db, batch.id, root)
 
-    const result = importScanned(db, batch.id, sourceId, (await scanDirectory(root, fixedReader)).files)
+    const result = importScanned(db, batch.id, sourceId, (await scanDirectory(root)).files)
     expect(result.added).toBe(6)
     expect(result.missing).toBe(0)
   })

@@ -11,6 +11,7 @@ import type {
   BatchRow,
   BatchState,
   Counts,
+  EnrichProgressEvent,
   ExportResult,
   FolderRow,
   ImportResult,
@@ -29,6 +30,8 @@ export interface AppState {
   counts: Counts | null
   loading: boolean
   error: string | null
+  // Background enrichment progress; null when no pass is active/draining.
+  enrichProgress: EnrichProgressEvent | null
 }
 
 type Action =
@@ -46,6 +49,7 @@ type Action =
   | { type: 'closed' }
   | { type: 'loading'; loading: boolean }
   | { type: 'error'; error: string }
+  | { type: 'enrich-progress'; progress: EnrichProgressEvent | null }
 
 const initialState: AppState = {
   batches: [],
@@ -56,7 +60,8 @@ const initialState: AppState = {
   photos: [],
   counts: null,
   loading: true,
-  error: null
+  error: null,
+  enrichProgress: null
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -105,6 +110,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'error':
       // Every failure lands here so the shell can never stick on loading=true.
       return { ...state, loading: false, error: action.error }
+    case 'enrich-progress':
+      return { ...state, enrichProgress: action.progress }
     default:
       return state
   }
@@ -313,6 +320,18 @@ export function AppStoreProvider({
   useEffect(() => {
     void boot(deps)
   }, [deps])
+
+  // Aggregated enrichment progress; the service sends done=total on drain and
+  // the provider clears the indicator at that point.
+  useEffect(() => {
+    const unsubscribe = api.onEnrichProgress((progress) =>
+      dispatch({
+        type: 'enrich-progress',
+        progress: progress.done >= progress.total ? null : progress
+      })
+    )
+    return unsubscribe
+  }, [api])
 
   // Persist every settled batchId/view change. The loading/error guards skip the
   // pre-hydration null state and failed boots, which must not overwrite a good

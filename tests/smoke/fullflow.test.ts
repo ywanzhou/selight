@@ -23,6 +23,7 @@ import {
   ensureThumbnail,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
+import { EnrichmentService } from '../../electron/media/enrich'
 import { ExiftoolReader } from '../../electron/media/rawPreview'
 import { exiftool } from 'exiftool-vendored'
 
@@ -109,7 +110,6 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
   let dbFile = ''
   let db: Database
   let batchId = -1
-  let reader: ExiftoolReader
   let thumbDir = ''
   let previewDir = ''
   let exportDir = ''
@@ -124,15 +124,10 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     previewDir = path.join(root, 'previews')
     exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-smoke-export-'))
     dirs.push(exportDir)
-    // Real ExifTool transport: the scan reads orientation from every real file,
-    // and webp files without an Orientation tag fall back to 1.
-    reader = new ExiftoolReader()
     batchId = createBatch(db, 'smoke batch').id
   })
 
   afterAll(async () => {
-    // Shut the stay-open ExifTool process down so no vendor process outlives the run.
-    await exiftool.end()
     if (db?.open) db.close()
     while (dirs.length) {
       fs.rmSync(dirs.pop()!, { recursive: true, force: true })
@@ -144,7 +139,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     const expectedPaths = walkFiles(CORPUS, true).sort()
 
     const tScan0 = performance.now()
-    const scan = await scanDirectory(CORPUS, reader)
+    const scan = await scanDirectory(CORPUS)
     const scanMs = performance.now() - tScan0
     scanned = scan.files
 
@@ -163,7 +158,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     const importMs = performance.now() - tImport0
     // eslint-disable-next-line no-console
     console.log(
-      `[smoke] scan+exiftool ${round1(scanMs)}ms (${scanned.length} files), ` +
+      `[smoke] fs scan ${round1(scanMs)}ms (${scanned.length} files), ` +
         `first importScanned ${round1(importMs)}ms`
     )
 
@@ -197,6 +192,37 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     expect(row.d).toBe(row.n)
     expect(row.inbox).toBe(expectedPaths.length)
     expect(row.missing).toBe(0)
+
+    // Background enrichment drains every row: dimensions filled, display
+    // state consistent with orientation, and the whole pass stays bounded.
+    const service = new EnrichmentService(db, new ExiftoolReader())
+    const tEnrich0 = performance.now()
+    service.submit(
+      (db.prepare('SELECT id FROM photos ORDER BY id').all() as { id: number }[]).map(
+        (r) => r.id
+      )
+    )
+    await service.whenIdle()
+    const enrichMs = performance.now() - tEnrich0
+    service.stop()
+    await exiftool.end()
+    // eslint-disable-next-line no-console
+    console.log(`[smoke] enrichment ${scanned.length} rows in ${round1(enrichMs)}ms`)
+
+    const unenriched = (
+      db
+        .prepare('SELECT COUNT(*) AS n FROM photos WHERE width IS NULL')
+        .get() as { n: number }
+    ).n
+    expect(unenriched).toBe(0)
+    const swapped = db
+      .prepare(
+        'SELECT width, height FROM photos WHERE orientation IN (6, 8)'
+      )
+      .all() as { width: number; height: number }[]
+    for (const dims of swapped) {
+      expect(dims.width).toBeLessThan(dims.height)
+    }
   })
 
   // --------------------------------------------------------- 2. classify + undo

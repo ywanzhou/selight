@@ -27,15 +27,30 @@ export class MediaQueue {
     if (added) this.pump()
   }
 
-  // splice (not unshift) so the given relative order survives at the front.
+  // Active ids are left running; ids already waiting are re-ranked to the
+  // front so viewport signals can overtake bulk work, then fresh ids join the
+  // front in input order.
   prioritize(ids: number[]): void {
-    const fresh = ids.filter((id) => !this.isKnown(id))
-    if (fresh.length > 0) this.queued.splice(0, 0, ...fresh)
+    // Input may repeat (rapid viewport signals); active ids stay running and
+    // duplicates collapse to one queue entry each.
+    const movable = [...new Set(ids)].filter((id) => !this.active.has(id))
+    if (movable.length === 0) return
+    for (const id of movable) {
+      const index = this.queued.indexOf(id)
+      if (index >= 0) this.queued.splice(index, 1)
+    }
+    this.queued.unshift(...movable)
     this.pump()
   }
 
   onIdle(cb: () => void): void {
     this.idleCallbacks.add(cb)
+  }
+
+  // True when nothing is running or waiting. Lets callers distinguish "already
+  // drained" from "will drain later", since onIdle only fires on a transition.
+  get isIdle(): boolean {
+    return this.running === 0 && this.queued.length === 0
   }
 
   // Shutdown gate: once stopped, enqueue/prioritize may still buffer ids but pump()
