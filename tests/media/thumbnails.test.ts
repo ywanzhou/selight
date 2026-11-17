@@ -2,34 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import sharp from 'sharp'
 
-// Electron is unavailable under bare-node Vitest (the package exports its executable
-// path string). Mock just the nativeImage surface ensureThumbnail uses.
-vi.mock('electron', () => ({
-  nativeImage: {
-    createFromBuffer: vi.fn(),
-    createThumbnailFromPath: vi.fn()
-  }
-}))
-
-// The Blink helper is an Electron shell: node tests exercise its contract via the pure
-// blinkProtocol suite and the committed Electron harness; here its boundary is mocked.
-vi.mock('../../electron/media/blinkThumbnail', () => ({
-  decodeWebpThumbnail: vi.fn(),
-  configureBlinkThumbnail: vi.fn(),
-  closeBlinkHelper: vi.fn()
-}))
-
-// Import after the mocks are registered.
-import { nativeImage } from 'electron'
-import { decodeWebpThumbnail } from '../../electron/media/blinkThumbnail'
-import { ensureThumbnail, type ThumbnailPhoto } from '../../electron/media/thumbnails'
+// Real libvips decode, no mocks: sharp ships prebuilt binaries and loads under
+// bare-node Vitest exactly like better-sqlite3. Every source image is generated
+// into a tmpdir fixture; the corpus is never opened for writing.
+import {
+  ensureThumbnail,
+  PLACEHOLDER_JPEG_BYTES,
+  type ThumbnailPhoto
+} from '../../electron/media/thumbnails'
 import { RawPreviewError } from '../../electron/media/rawPreview'
 import { tinyJpeg } from './fixtures'
 
 const dirs: string[] = []
-const mocked = vi.mocked(nativeImage)
-const mockedBlink = vi.mocked(decodeWebpThumbnail)
 
 function makeCacheDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-thumb-'))
@@ -37,16 +23,46 @@ function makeCacheDir(): string {
   return dir
 }
 
-function fakeImage(): {
-  isEmpty: () => boolean
-  resize: ReturnType<typeof vi.fn>
-} {
+// 640x480 encoded buffer; orientation is written into EXIF metadata without
+// rotating the stored pixels, exactly like a camera-produced file.
+async function makeImage(opts: { ext: '.jpg' | '.webp'; orientation?: number }): Promise<Buffer> {
+  let pipeline = sharp({
+    create: {
+      width: 640,
+      height: 480,
+      channels: 3,
+      background: { r: 200, g: 100, b: 50, alpha: 1 }
+    }
+  })
+  if (opts.orientation !== undefined) {
+    pipeline = pipeline.withMetadata({ orientation: opts.orientation })
+  }
+  return pipeline.toFormat(opts.ext === '.jpg' ? 'jpeg' : 'webp').toBuffer()
+}
+
+interface FixturePhoto {
+  photo: ThumbnailPhoto
+  source: string
+}
+
+async function writeSource(
+  name: string,
+  image: Buffer,
+  overrides: Partial<ThumbnailPhoto> = {}
+): Promise<FixturePhoto> {
+  const dir = makeCacheDir()
+  const source = path.join(dir, name)
+  await fs.promises.writeFile(source, image)
   return {
-    isEmpty: () => false,
-    resize: vi.fn(() => ({
-      isEmpty: () => false,
-      toJPEG: () => tinyJpeg()
-    }))
+    source,
+    photo: {
+      id: 42,
+      absPath: source,
+      ext: path.extname(name).toLowerCase(),
+      orientation: 1,
+      missing: 0,
+      ...overrides
+    }
   }
 }
 
@@ -62,7 +78,6 @@ function photo(overrides: Partial<ThumbnailPhoto> = {}): ThumbnailPhoto {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -73,45 +88,100 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('ensureThumbnail placeholder sidecar', () => {
-  it('marks a missing photo with a persistent sidecar and keeps placeholder:true on cache hit', async () => {
+describe('ensureThumbnail sharp pipeline', () => {
+  it('writes a real 320-long-edge JPEG for a healthy jpg, no sidecar, and serves cache hits without regenerating', async () => {
     const cacheDir = makeCacheDir()
-    const p = photo({ missing: 1 })
+    const { photo: p } = await writeSource('healthy.jpg', await makeImage({ ext: '.jpg' }))
+    const out = path.join(cacheDir, '42.jpg')
+    const marker = `${out}.placeholder`
+
+    const first = await ensureThumbnail(p, cacheDir)
+    expect(first).toEqual({ path: out, placeholder: false })
+    const bytes = fs.readFileSync(out)
+    expect(bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
+    const meta = await sharp(out).metadata()
+    expect(meta.width).toBe(320)
+    expect(meta.height).toBe(240)
+    expect(fs.existsSync(marker)).toBe(false)
+
+    const mtimeBefore = fs.statSync(out).mtimeMs
+    const second = await ensureThumbnail(p, cacheDir)
+    expect(second).toEqual({ path: out, placeholder: false })
+    expect(fs.statSync(out).mtimeMs).toBe(mtimeBefore)
+  })
+
+  it.each([6, 8])('bakes EXIF orientation %s into a physically vertical thumbnail', async (orientation) => {
+    const cacheDir = makeCacheDir()
+    const { photo: p } = await writeSource(
+      `vertical-${orientation}.jpg`,
+      await makeImage({ ext: '.jpg', orientation }),
+      { orientation }
+    )
+
+    const result = await ensureThumbnail(p, cacheDir)
+    expect(result.placeholder).toBe(false)
+    const meta = await sharp(result.path).metadata()
+    expect(meta.width).toBeLessThan(meta.height!)
+    expect(meta.height).toBe(320)
+  })
+
+  it('decodes webp through sharp without any helper boundary', async () => {
+    const cacheDir = makeCacheDir()
+    const { photo: p } = await writeSource('p.webp', await makeImage({ ext: '.webp' }))
+
+    const result = await ensureThumbnail(p, cacheDir)
+    expect(result).toEqual({ path: path.join(cacheDir, '42.jpg'), placeholder: false })
+    expect(fs.readFileSync(result.path).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
+    expect(fs.existsSync(`${result.path}.placeholder`)).toBe(false)
+  })
+
+  it('accepts upper-case extensions (.JPG, .WEBP)', async () => {
+    const cacheDir = makeCacheDir()
+    const { photo: p } = await writeSource('UPPER.JPG', await makeImage({ ext: '.jpg' }), {
+      ext: '.JPG'
+    })
+
+    const result = await ensureThumbnail(p, cacheDir)
+    expect(result.placeholder).toBe(false)
+    const meta = await sharp(result.path).metadata()
+    expect(meta.width).toBe(320)
+  })
+
+  it.each([
+    ['zero-byte', Buffer.alloc(0)],
+    ['truncated', tinyJpeg().subarray(0, 50)]
+  ])('degrades a %s file to placeholder + sidecar and never retries on cache hit', async (_name, broken) => {
+    const cacheDir = makeCacheDir()
+    const { photo: p } = await writeSource('broken.jpg', broken)
     const out = path.join(cacheDir, '42.jpg')
     const marker = `${out}.placeholder`
 
     const first = await ensureThumbnail(p, cacheDir)
     expect(first).toEqual({ path: out, placeholder: true })
-    expect(fs.existsSync(out)).toBe(true)
-    expect(fs.existsSync(marker)).toBe(true)
-    expect(mocked.createThumbnailFromPath).not.toHaveBeenCalled()
-
-    // Restart-equivalent: nothing in memory, only the files on disk.
-    const second = await ensureThumbnail(p, cacheDir)
-    expect(second).toEqual({ path: out, placeholder: true })
-  })
-
-  it('writes the sidecar when decoding fails and still reports placeholder:true after a cache hit', async () => {
-    const cacheDir = makeCacheDir()
-    mocked.createThumbnailFromPath.mockRejectedValue(new Error('decode boom'))
-    const p = photo()
-    const marker = path.join(cacheDir, '42.jpg.placeholder')
-
-    const first = await ensureThumbnail(p, cacheDir)
-    expect(first.placeholder).toBe(true)
+    expect(fs.readFileSync(out)).toEqual(PLACEHOLDER_JPEG_BYTES)
     expect(fs.existsSync(marker)).toBe(true)
 
+    const mtimeBefore = fs.statSync(out).mtimeMs
     const second = await ensureThumbnail(p, cacheDir)
     expect(second.placeholder).toBe(true)
-    // Cache hit must not retry the failing decoder.
-    expect(mocked.createThumbnailFromPath).toHaveBeenCalledTimes(1)
+    expect(fs.statSync(out).mtimeMs).toBe(mtimeBefore)
   })
 
-  it('wraps a RAW RawPreviewError into a placeholder with sidecar', async () => {
+  it('marks a missing=1 photo with placeholder without touching the absent source', async () => {
+    const cacheDir = makeCacheDir()
+    const p = photo({ missing: 1 })
+    const out = path.join(cacheDir, '42.jpg')
+
+    const result = await ensureThumbnail(p, cacheDir)
+    expect(result).toEqual({ path: out, placeholder: true })
+    expect(fs.existsSync(`${out}.placeholder`)).toBe(true)
+    expect(fs.readFileSync(out)).toEqual(PLACEHOLDER_JPEG_BYTES)
+  })
+
+  it('wraps a RAW ensureRawPreview rejection (RawPreviewError) into placeholder + sidecar', async () => {
     const cacheDir = makeCacheDir()
     const previewDir = makeCacheDir()
     const p = photo({ ext: '.arw' })
-    const marker = path.join(cacheDir, '42.jpg.placeholder')
 
     const result = await ensureThumbnail(p, cacheDir, {
       previewDir,
@@ -122,66 +192,25 @@ describe('ensureThumbnail placeholder sidecar', () => {
       }
     })
     expect(result.placeholder).toBe(true)
-    expect(fs.existsSync(marker)).toBe(true)
+    expect(fs.existsSync(`${path.join(cacheDir, '42.jpg')}.placeholder`)).toBe(true)
   })
 
-  it('writes no sidecar on success and reports placeholder:false on cache hit', async () => {
+  it('resizes an extracted RAW preview through sharp and clears a stale sidecar', async () => {
     const cacheDir = makeCacheDir()
-    mocked.createThumbnailFromPath.mockResolvedValue(fakeImage() as never)
-    const p = photo()
-    const out = path.join(cacheDir, '42.jpg')
-    const marker = `${out}.placeholder`
-
-    const first = await ensureThumbnail(p, cacheDir)
-    expect(first).toEqual({ path: out, placeholder: false })
-    expect(fs.existsSync(out)).toBe(true)
-    expect(fs.existsSync(marker)).toBe(false)
-    // Real JPEG magic, not the placeholder.
-    expect(fs.readFileSync(out).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
-
-    const second = await ensureThumbnail(p, cacheDir)
-    expect(second).toEqual({ path: out, placeholder: false })
-    expect(mocked.createThumbnailFromPath).toHaveBeenCalledTimes(1)
-  })
-
-  it('routes webp through the Blink helper and writes its JPEG without touching nativeImage', async () => {
-    const cacheDir = makeCacheDir()
-    const jpeg = tinyJpeg()
-    mockedBlink.mockResolvedValue(jpeg)
-    const p = photo({ ext: '.webp', absPath: path.join(os.tmpdir(), 'selight-source.webp') })
-    const out = path.join(cacheDir, '42.jpg')
-
-    const result = await ensureThumbnail(p, cacheDir)
-
-    expect(result).toEqual({ path: out, placeholder: false })
-    expect(mockedBlink).toHaveBeenCalledWith(p.absPath)
-    expect(fs.readFileSync(out)).toEqual(jpeg)
-    expect(fs.existsSync(`${out}.placeholder`)).toBe(false)
-    expect(mocked.createThumbnailFromPath).not.toHaveBeenCalled()
-    expect(mocked.createFromBuffer).not.toHaveBeenCalled()
-  })
-
-  it('degrades a Blink webp failure to the placeholder with sidecar, keeping the queue contract', async () => {
-    const cacheDir = makeCacheDir()
-    mockedBlink.mockRejectedValue(new Error('helper unavailable'))
-    const p = photo({ ext: '.webp', absPath: path.join(os.tmpdir(), 'selight-source.webp') })
-    const out = path.join(cacheDir, '42.jpg')
-
-    const result = await ensureThumbnail(p, cacheDir)
-
-    expect(result).toEqual({ path: out, placeholder: true })
-    expect(fs.existsSync(`${out}.placeholder`)).toBe(true)
-    expect(mocked.createThumbnailFromPath).not.toHaveBeenCalled()
-  })
-
-  it('removes a stale sidecar when a later generation succeeds', async () => {
-    const cacheDir = makeCacheDir()
+    const previewDir = makeCacheDir()
+    const extracted = path.join(previewDir, '42.jpg')
+    await fs.promises.writeFile(extracted, await makeImage({ ext: '.jpg' }))
+    const p = photo({ ext: '.arw' })
     const out = path.join(cacheDir, '42.jpg')
     fs.writeFileSync(`${out}.placeholder`, '')
-    mocked.createThumbnailFromPath.mockResolvedValue(fakeImage() as never)
 
-    const result = await ensureThumbnail(photo(), cacheDir)
-    expect(result.placeholder).toBe(false)
+    const result = await ensureThumbnail(p, cacheDir, {
+      previewDir,
+      reader: { ensureRawPreview: async () => extracted }
+    })
+    expect(result).toEqual({ path: out, placeholder: false })
     expect(fs.existsSync(`${out}.placeholder`)).toBe(false)
+    const meta = await sharp(out).metadata()
+    expect(meta.width).toBe(320)
   })
 })
