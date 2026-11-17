@@ -11,7 +11,7 @@ import {
 } from './domain/batches'
 import type { MediaRoots } from './media/resolve'
 import { createFolder, listFolders, renameFolder } from './domain/folders'
-import { counts, listPhotos } from './domain/photos'
+import { counts, findUnenrichedPhotoIds, listPhotos } from './domain/photos'
 import {
   assignToFolder,
   deleteFolderWithPhotos,
@@ -22,10 +22,10 @@ import {
 import { undoLastGroup } from './domain/actions'
 import { importScanned, scanDirectory } from './scanner'
 import { exportBatch as runExport } from './exporter'
+import type { EnrichmentService } from './media/enrich'
 import type { MediaQueue } from './media/queue'
 import type { SessionStore } from './session'
 import type {
-  BatchState,
   ImportResult,
   SelightHandlers,
   SessionState
@@ -39,10 +39,7 @@ export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   /** Background metadata enrichment (orientation/dimensions); main.ts wires the real service. */
-  enrichment: {
-    submit(ids: number[]): void
-    stop(): void
-  }
+  enrichment: Pick<EnrichmentService, 'submit' | 'stop'>
   /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
   mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>
@@ -132,13 +129,16 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
       touchBatch(db, batchId)
       const batch = getBatch(db, batchId)
       if (!batch) throw new Error(`batch not found: ${batchId}`)
-      const state: BatchState = {
+      // Catch-up for interrupted enrichment (app quit mid-pass): rows whose
+      // width is still NULL get re-submitted to the singleton service.
+      const unenriched = findUnenrichedPhotoIds(db, batchId)
+      if (unenriched.length > 0) enrichment.submit(unenriched)
+      return {
         batch,
         folders: listFolders(db, batchId),
         counts: counts(db, batchId),
         photos: listPhotos(db, batchId, { kind: 'inbox' })
       }
-      return state
     },
 
     // ---- folders ----------------------------------------------------------

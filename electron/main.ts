@@ -6,6 +6,7 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from './db/schema'
 import { ExiftoolReader } from './media/rawPreview'
 import { createThumbnailQueue } from './media/thumbnails'
+import { EnrichmentService } from './media/enrich'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -17,6 +18,7 @@ import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './sh
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
 let thumbQueue: MediaQueue | null = null
+let enrichment: EnrichmentService | null = null
 let sessionStore: SessionStore | null = null
 let isQuitting = false
 // Last directory chosen for export. openPath only opens paths inside this root, so a
@@ -73,19 +75,20 @@ app.whenReady().then(() => {
   registerMediaProtocol(db, roots, (id) => thumbQueue?.enqueue([id]))
 
   const exifReader = new ExiftoolReader()
-  thumbQueue = createThumbnailQueue(db, roots, exifReader)
-  sessionStore = createFileSessionStore(path.join(userData, 'session.json'))
-  // Placeholder until the EnrichmentService lands: discovery rows keep their
-  // DEFAULT orientation and NULL dimensions; the real service replaces this
-  // without touching the handler contract.
-  const enrichment = {
-    submit: (_ids: number[]): void => {
-      /* wired by the enrichment task */
-    },
-    stop: (): void => {
-      /* no-op placeholder */
+  thumbQueue = createThumbnailQueue(
+    db,
+    roots,
+    exifReader,
+    (id, ok) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.mediaReady, { id, kind: 'thumb', ok })
     }
-  }
+  )
+  enrichment = new EnrichmentService(db, exifReader, {
+    onProgress: (done, total) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.enrichProgress, { done, total })
+    }
+  })
+  sessionStore = createFileSessionStore(path.join(userData, 'session.json'))
   const handlers = createHandlers({
     db,
     thumbQueue,
@@ -257,8 +260,9 @@ app.on('will-quit', (event) => {
     try {
       // Land any debounced session change before the process exits.
       sessionStore?.flush()
-      // Stop starting new thumbnail work; in-flight tasks are allowed to finish.
+      // Stop starting new background work; in-flight tasks are allowed to finish.
       thumbQueue?.stop()
+      enrichment?.stop()
       try {
         db?.close()
       } catch (err) {

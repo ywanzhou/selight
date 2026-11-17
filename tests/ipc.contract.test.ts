@@ -242,6 +242,29 @@ describe('IPC handler contract — full curation chain', () => {
     expect(queueCalls.prioritize.at(-1)).toEqual([42, 43])
   })
 
+  it('submits unenriched rows to the enrichment service when a batch is opened', async () => {
+    const { handlers, enrichmentCalls, db } = setup()
+    const batch = await handlers.createBatch()
+    const root = makeFixtureTree()
+    await handlers.importDirectory(batch.id, root)
+    enrichmentCalls.length = 0
+
+    // Fresh rows still carry width IS NULL, so openBatch must re-submit them
+    // as the restart/interruption catch-up path.
+    const state = await handlers.openBatch(batch.id)
+    const inboxIds = state.photos.map((p) => p.id).sort((a, b) => a - b)
+    expect(enrichmentCalls).toHaveLength(1)
+    expect([...enrichmentCalls[0]].sort((a, b) => a - b)).toEqual(inboxIds)
+
+    // After every row is enriched the catch-up submits nothing.
+    db.prepare('UPDATE photos SET width = 100, height = 80 WHERE batch_id = ?').run(
+      batch.id
+    )
+    enrichmentCalls.length = 0
+    await handlers.openBatch(batch.id)
+    expect(enrichmentCalls).toHaveLength(0)
+  })
+
   it('unassign moves folder photos back to inbox through the handler and one undo restores them', async () => {
     const { handlers } = setup()
     const batch = await handlers.createBatch()

@@ -60,6 +60,8 @@ function makeApi(overrides: Partial<Record<keyof SelightApi, unknown>> = {}): Se
   >
   base.onDbRecovered = vi.fn(() => () => {})
   base.onExportProgress = vi.fn(() => () => {})
+  base.onEnrichProgress = vi.fn(() => () => {})
+  base.onMediaReady = vi.fn(() => () => {})
   return { ...base, ...overrides } as unknown as SelightApi
 }
 
