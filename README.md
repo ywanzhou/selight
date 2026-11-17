@@ -71,7 +71,8 @@ npm run pack:win
 | 数据 | better-sqlite3，同步事务，库文件位于应用 `userData/selight.db` |
 | EXIF / RAW | exiftool-vendored（自带二进制，离线可用），仅服务 RAW 富化与内嵌预览 |
 | 缩略图 | sharp（libvips 预编译二进制）统一解码，EXIF 方向烘焙，RAW 走 exiftool 内嵌预览 |
-| 后台任务 | EnrichmentService 单例（直读 4 / RAW 2 双池、去重、聚合进度），缩略图 MediaQueue 视口优先 |
+| 预览图 | 长边 2048 预览副本，selight://photo 只发缓存不发源字节，三态（加载/缺失/失败可重试） |
+| 后台任务 | EnrichmentService 单例（直读 4 / RAW 2 双池、去重、聚合进度），缩略图/预览 MediaQueue 视口优先、404 按需入队 |
 | 虚拟化 | react-window |
 | 测试 | Vitest（领域逻辑 / IPC 契约 / 媒体管线 / 真实 ARW 冒烟 harness） |
 
