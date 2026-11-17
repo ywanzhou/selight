@@ -160,6 +160,17 @@ export function findUnenrichedPhotoIds(db: Database, batchId: number): number[] 
   return rows.map((row) => row.id)
 }
 
+// Backfill candidates: enriched rows whose thumbnail may still be missing.
+// fs-level existence is checked by the caller; this stays a pure SQL selector.
+export function findEnrichedPhotoIds(db: Database, limit: number): number[] {
+  const rows = db
+    .prepare(
+      'SELECT id FROM photos WHERE width IS NOT NULL ORDER BY id LIMIT ?'
+    )
+    .all(limit) as { id: number }[]
+  return rows.map((row) => row.id)
+}
+
 export function counts(
   db: Database,
   batchId: number

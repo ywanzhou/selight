@@ -9,6 +9,7 @@ import { createThumbnailQueue } from './media/thumbnails'
 import { createPreviewQueue } from './media/previews'
 import { EnrichmentService } from './media/enrich'
 import { retryMediaGeneration } from './media/retry'
+import { scheduleThumbnailBackfill } from './media/backfill'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -100,6 +101,9 @@ app.whenReady().then(() => {
     (id) => thumbs.enqueue([id]),
     (id) => previews.enqueue([id])
   )
+  // Fill missing thumbnails during idle; ordinary enqueue keeps viewport
+  // prioritize calls able to overtake this background work.
+  scheduleThumbnailBackfill(db, thumbs, roots)
   enrichment = new EnrichmentService(db, exifReader, {
     onProgress: (done, total) => {
       mainWindow?.webContents.send(IPC_CHANNELS.enrichProgress, { done, total })
