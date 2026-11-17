@@ -1,30 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it as vitestIt, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it as vitestIt } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 
-// Ruling 2: electron's nativeImage cannot load under bare-node Vitest. This mock keeps
-// every node-runnable boundary of ensureThumbnail exercisable (cache hit/miss, atomic
-// write, placeholder sidecar, MediaQueue wiring against real DB rows and the real webp
-// paths); real webp decoding is proven by the Electron harness
-// tests/smoke/electron-thumb-harness.cjs, run manually with `npx electron`.
-vi.mock('electron', () => ({
-  nativeImage: {
-    createFromBuffer: vi.fn(),
-    createThumbnailFromPath: vi.fn()
-  }
-}))
-
-// Ruling 18: webp now decodes in the hidden Blink helper, not nativeImage. The real
-// decoder is proven by tests/smoke/electron-blink-harness.cjs against the live corpus.
-vi.mock('../../electron/media/blinkThumbnail', () => ({
-  decodeWebpThumbnail: vi.fn(),
-  configureBlinkThumbnail: vi.fn(),
-  closeBlinkHelper: vi.fn()
-}))
-
-import { decodeWebpThumbnail } from '../../electron/media/blinkThumbnail'
+// Real sharp(libvips) decode runs under bare-node Vitest via prebuilt N-API
+// binaries, so no electron mock is needed; the full thumbnail path is exercised
+// against the real corpus here, with the Electron harness
+// tests/smoke/electron-media-harness.cjs proving the same path inside a real
+// Electron process (RSS, process-tree cleanup).
+import sharp from 'sharp'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { createFolder, listFolders } from '../../electron/domain/folders'
@@ -40,7 +25,6 @@ import {
 } from '../../electron/media/thumbnails'
 import { ExiftoolReader } from '../../electron/media/rawPreview'
 import { exiftool } from 'exiftool-vendored'
-import { tinyJpeg } from '../media/fixtures'
 
 // The real corpus is never created or modified by this suite: every DB, cache and
 // export lands in os.tmpdir(), and the scanner only opens source files read-only.
@@ -320,10 +304,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
   })
 
   // ---------------------------------------------------------------- 3. thumbnails
-  slowIt('drains the thumbnail queue over 20 real webp rows with valid JPEG cache files and sidecar contract', async () => {
-    const mockedBlink = vi.mocked(decodeWebpThumbnail)
-    mockedBlink.mockResolvedValue(tinyJpeg())
-
+  slowIt('drains the thumbnail queue over 20 real webp rows with sharp JPEG cache files and sidecar contract', async () => {
     const webpRows = db
       .prepare(
         `SELECT id, abs_path AS absPath, ext, orientation, missing
@@ -344,26 +325,28 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
 
     await drain(sample.map((p) => p.id))
 
-    expect(mockedBlink).toHaveBeenCalledTimes(20)
-    // The real corpus path reached the Blink boundary untouched and existing on disk.
-    for (const call of mockedBlink.mock.calls) {
-      const source = call[0] as string
-      expect(fs.existsSync(source)).toBe(true)
-      expect(source.toLowerCase().endsWith('.webp')).toBe(true)
-    }
     for (const photo of sample) {
+      // The real corpus path stays read-only and existing on disk.
+      expect(fs.existsSync(photo.absPath)).toBe(true)
       const file = path.join(thumbDir, `${photo.id}.jpg`)
       expect(fs.existsSync(file)).toBe(true)
       const bytes = fs.readFileSync(file)
       expect(bytes.length).toBeGreaterThan(0)
-      // Ruling 2: JPEG SOI magic only; no decode assertion under bare node.
       expect(bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
       expect(fs.existsSync(`${file}.placeholder`)).toBe(false)
+      // Real sharp decode: the long edge is exactly the 320px thumbnail target.
+      const meta = await sharp(file).metadata()
+      expect(Math.max(meta.width!, meta.height!)).toBe(320)
     }
 
-    // Second drain: disk cache hits, the Blink decoder must not run again.
+    // Second drain: disk cache hits must not rewrite any file (mtime invariant).
+    const mtimes = sample.map((p) =>
+      fs.statSync(path.join(thumbDir, `${p.id}.jpg`)).mtimeMs
+    )
     await drain(sample.map((p) => p.id))
-    expect(mockedBlink).toHaveBeenCalledTimes(20)
+    sample.forEach((p, i) => {
+      expect(fs.statSync(path.join(thumbDir, `${p.id}.jpg`)).mtimeMs).toBe(mtimes[i])
+    })
 
     // Placeholder sidecar for a missing photo: decoder never runs, marker persists.
     const missingPhoto = webpRows.find((p) => !sample.some((s) => s.id === p.id))!
@@ -380,28 +363,57 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     expect(fs.readFileSync(missingFile).subarray(0, 3)).toEqual(
       Buffer.from([0xff, 0xd8, 0xff])
     )
-    expect(mockedBlink).toHaveBeenCalledTimes(20)
     db.prepare('UPDATE photos SET missing = 0 WHERE id = ?').run(missingPhoto.id)
 
-    // Decode failure writes the sidecar; a later successful generation clears it.
-    const failPhoto = webpRows.find(
-      (p) => !sample.some((s) => s.id === p.id) && p.id !== missingPhoto.id
-    )!
-    const failFile = path.join(thumbDir, `${failPhoto.id}.jpg`)
-    mockedBlink.mockRejectedValueOnce(new Error('simulated decode boom'))
-    const failed = await ensureThumbnail(failPhoto, thumbDir)
-    expect(failed.placeholder).toBe(true)
-    expect(fs.existsSync(`${failFile}.placeholder`)).toBe(true)
-    fs.rmSync(failFile, { force: true })
-    fs.rmSync(`${failFile}.placeholder`, { force: true })
-    const recovered = await ensureThumbnail(failPhoto, thumbDir)
-    expect(recovered.placeholder).toBe(false)
-    // 20 drained + one failing attempt + one successful recovery attempt.
-    expect(mockedBlink).toHaveBeenCalledTimes(22)
-    expect(fs.existsSync(`${failFile}.placeholder`)).toBe(false)
-    expect(fs.readFileSync(failFile).subarray(0, 3)).toEqual(
-      Buffer.from([0xff, 0xd8, 0xff])
+    // Failure/recovery on an isolated tmp row: the read-only corpus never gets
+    // a broken file. Zero-byte source -> placeholder; valid JPEG replacement ->
+    // a real thumbnail with the sidecar cleared.
+    const tmpSource = path.join(path.dirname(thumbDir), 'recovery-case.jpg')
+    fs.writeFileSync(tmpSource, Buffer.alloc(0))
+    const tmpSourceId = Number(
+      db
+        .prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)')
+        .run(batchId, tmpSource).lastInsertRowid
     )
+    const tmpPhotoId = Number(
+      db
+        .prepare(
+          `INSERT INTO photos
+             (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, orientation, status, missing)
+           VALUES (?, ?, ?, 'recovery-case.jpg', '.jpg', 0, 1, 1, 'inbox', 0)`
+        )
+        .run(batchId, tmpSourceId, tmpSource).lastInsertRowid
+    )
+    const tmpRow = db
+      .prepare(
+        'SELECT id, abs_path AS absPath, ext, orientation, missing FROM photos WHERE id = ?'
+      )
+      .get(tmpPhotoId) as ThumbnailPhoto
+    const failed = await ensureThumbnail(tmpRow, thumbDir)
+    const tmpThumb = path.join(thumbDir, `${tmpPhotoId}.jpg`)
+    expect(failed.placeholder).toBe(true)
+    expect(fs.existsSync(`${tmpThumb}.placeholder`)).toBe(true)
+
+    fs.rmSync(tmpThumb, { force: true })
+    fs.rmSync(`${tmpThumb}.placeholder`, { force: true })
+    fs.writeFileSync(
+      tmpSource,
+      await sharp({
+        create: {
+          width: 640,
+          height: 480,
+          channels: 3,
+          background: { r: 12, g: 34, b: 56, alpha: 1 }
+        }
+      })
+        .jpeg()
+        .toBuffer()
+    )
+    const recovered = await ensureThumbnail(tmpRow, thumbDir)
+    expect(recovered.placeholder).toBe(false)
+    expect(fs.existsSync(`${tmpThumb}.placeholder`)).toBe(false)
+    const recoveredMeta = await sharp(tmpThumb).metadata()
+    expect(recoveredMeta.width).toBe(320)
     queue.stop()
   })
 

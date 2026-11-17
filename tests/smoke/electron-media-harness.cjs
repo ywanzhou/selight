@@ -1,17 +1,16 @@
-// Node launcher for the Ruling 18 Blink webp smoke harness. Run after a build:
+// Node launcher for the sharp media smoke harness. Run after a build:
 //
-//   npm run build && node tests/smoke/electron-blink-harness.cjs
+//   npm run build && node tests/smoke/electron-media-harness.cjs
 //
-// It spawns the bundled out/main/harness.js inside a real Electron process, waits
-// for the assertion exit code, then kills the whole Electron process tree
-// (taskkill /T) and prints WMI zero-remainder evidence. Exit code is non-zero when
-// the harness assertions fail OR any harness Electron process survives cleanup.
+// It spawns the bundled out/main/media-harness.js inside a real Electron
+// process, waits for the assertion exit code, then kills the whole Electron
+// process tree (taskkill /T) and prints WMI zero-remainder evidence.
 const { spawn, spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 
 const electronExe = require('electron')
-const harness = path.resolve(__dirname, '..', '..', 'out', 'main', 'harness.js')
+const harness = path.resolve(__dirname, '..', '..', 'out', 'main', 'media-harness.js')
 
 if (!fs.existsSync(harness)) {
   console.error(`[harness] ${harness} missing — run "npm run build" first`)
@@ -41,11 +40,11 @@ child.on('close', (code) => {
   // this harness, regardless of how many unrelated Electron apps may be running.
   const ps =
     "Get-CimInstance Win32_Process -Filter \"Name='electron.exe'\" | " +
-    "Where-Object { $_.CommandLine -like '*harness.js*' } | " +
+    "Where-Object { $_.CommandLine -like '*media-harness.js*' } | " +
     'Measure-Object | Select-Object -ExpandProperty Count'
   const wmi = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
   const remainder = Number(wmi.stdout.trim())
-  console.log(`[harness] WMI remainder (electron.exe *harness.js*): ${wmi.stdout.trim()}`)
+  console.log(`[harness] WMI remainder (electron.exe *media-harness.js*): ${wmi.stdout.trim()}`)
 
   const ok = !timedOut && code === 0 && remainder === 0 && wmi.status === 0
   process.exit(ok ? 0 : 1)

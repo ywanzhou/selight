@@ -1,26 +1,20 @@
-// Committed Electron smoke harness for the Ruling 18 Blink webp pipeline. Bundled by
-// electron-vite into out/main/harness.js and launched through
-// tests/smoke/electron-blink-harness.cjs (which also verifies process-tree cleanup).
+// Committed Electron smoke harness for the sharp media pipeline. Bundled by
+// electron-vite into out/main/media-harness.js and launched through
+// tests/smoke/electron-media-harness.cjs (which also verifies process-tree
+// cleanup with taskkill /T + a WMI zero-remainder check).
 //
 // It drives the REAL production modules end to end:
-//   ensureThumbnail -> decodeWebpThumbnail -> hidden helper window -> selight://photo
-//   -> Blink createImageBitmap/OffscreenCanvas -> width-320 JPEG over IPC.
-// The corpus is opened read-only; every DB, cache and control file lands in a temp
-// dir removed before exit. Exit code 1 means production thumbnails are not real.
-import { app, nativeImage } from 'electron'
+//   ensureThumbnail -> sharp(libvips) decode/rotate/resize -> width-320 JPEG
+// The corpus is opened read-only; every DB and cache file lands in a temp
+// dir removed before exit. Exit code 1 means production thumbnails are not
+// real sharp output.
+import { app } from 'electron'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import sharp from 'sharp'
 import { openDatabase } from '../../electron/db/schema'
-import { registerMediaProtocol } from '../../electron/media/protocol'
-import {
-  closeBlinkHelper,
-  configureBlinkThumbnail,
-  decodeWebpThumbnail
-} from '../../electron/media/blinkThumbnail'
-import { BlinkThumbnailError } from '../../electron/shared/blinkProtocol'
 import {
   ensureThumbnail,
   PLACEHOLDER_JPEG_BYTES,
@@ -77,31 +71,29 @@ app.whenReady().then(async () => {
       return
     }
 
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-blink-harness-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-media-harness-'))
     tempDirs.push(root)
     const thumbDir = path.join(root, 'thumbnails')
     const previewDir = path.join(root, 'previews')
     fs.mkdirSync(thumbDir)
     fs.mkdirSync(previewDir)
 
-    // ----------------------------------------------------------- JPEG path control
-    // The control T18 was missing: prove nativeImage's path API itself works, so the
-    // webp fault is format-specific rather than a broken path-based API.
+    // ------------------------------------------------------------- sharp control
+    // Prove libvips itself can encode a JPEG inside the Electron process.
     const controlJpg = path.join(root, 'control.jpg')
-    const controlBytes = await sharp({
-      create: { width: 8, height: 4, channels: 3, background: { r: 200, g: 100, b: 50 } }
-    })
-      .jpeg()
-      .toBuffer()
-    fs.writeFileSync(controlJpg, controlBytes)
-    const controlImage = await nativeImage.createThumbnailFromPath(controlJpg, {
-      width: 320,
-      height: 320
-    })
-    const jpegControl = { ok: !controlImage.isEmpty(), size: controlImage.getSize() }
-    if (!jpegControl.ok) fail('JPEG control failed: createThumbnailFromPath decoded nothing')
+    fs.writeFileSync(
+      controlJpg,
+      await sharp({
+        create: { width: 8, height: 4, channels: 3, background: { r: 200, g: 100, b: 50 } }
+      })
+        .jpeg()
+        .toBuffer()
+    )
+    const controlMeta = await sharp(controlJpg).metadata()
+    const sharpControl = { ok: controlMeta.width === 8 && controlMeta.height === 4 }
+    if (!sharpControl.ok) fail('sharp JPEG control failed')
 
-    // ------------------------------------------------------------- DB + protocol
+    // ------------------------------------------------------------- DB + samples
     db = openDatabase(path.join(root, 'harness.db')).db
     const batchId = Number(
       db.prepare('INSERT INTO batches (name) VALUES (?)').run('harness').lastInsertRowid
@@ -124,26 +116,9 @@ app.whenReady().then(async () => {
       missing: 0
     }))
 
-    const roots = { thumbDir, previewDir }
-    const rendererRoot = path.join(__dirname, '../renderer')
-    registerMediaProtocol(db, roots, rendererRoot)
-    // This entry always builds to out/main/harness.js, so __dirname anchors the
-    // sibling preload/renderer outputs exactly like electron/main.ts does.
-    configureBlinkThumbnail({
-      lookupPhoto: (absPath: string) => {
-        const row = db!
-          .prepare('SELECT id, missing FROM photos WHERE abs_path = ?')
-          .get(absPath) as { id: number; missing: number } | undefined
-        return row && row.missing === 0 ? { id: row.id } : null
-      },
-      preloadPath: path.join(__dirname, '../preload/helper.js'),
-      helperPage: 'selight://helper/helper.html'
-    })
-    // A helper-window crash must not let Electron's default quit end the run before
-    // the assertions and app.exit() decide the exit code.
     app.on('window-all-closed', () => {})
 
-    // --------------------------------------------- 20 real webp through the pipeline
+    // --------------------------------------------- 20 real webp through sharp
     const files: Array<Record<string, unknown>> = []
     const durations: number[] = []
     for (const photo of rows) {
@@ -152,48 +127,37 @@ app.whenReady().then(async () => {
       durations.push(performance.now() - t0)
       const file = path.join(thumbDir, `${photo.id}.jpg`)
       const sidecar = `${file}.placeholder`
-      const row: Record<string, unknown> = {
+      const record: Record<string, unknown> = {
         source: path.relative(CORPUS, photo.absPath),
         placeholder: result.placeholder
       }
       if (!fs.existsSync(file)) {
         fail(`thumbnail missing for photo ${photo.id}`)
-      } else {
-        const bytes = fs.readFileSync(file)
-        const soi = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-        const hasSidecar = fs.existsSync(sidecar)
-        const isPlaceholderBytes = Buffer.compare(bytes, PLACEHOLDER_JPEG_BYTES) === 0
-        const dims = nativeImage.createFromBuffer(bytes).getSize()
-        Object.assign(row, {
-          bytes: bytes.length,
-          soi,
-          sidecar: hasSidecar,
-          placeholderBytes: isPlaceholderBytes,
-          width: dims.width,
-          height: dims.height
-        })
-        if (!soi) fail(`photo ${photo.id}: missing JPEG SOI marker`)
-        if (hasSidecar) fail(`photo ${photo.id}: unexpected placeholder sidecar`)
-        if (isPlaceholderBytes) fail(`photo ${photo.id}: bytes equal the placeholder constant`)
-        if (dims.width !== 320) fail(`photo ${photo.id}: width ${dims.width} is not 320`)
+        files.push(record)
+        continue
       }
+      const bytes = fs.readFileSync(file)
+      const soi = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      const hasSidecar = fs.existsSync(sidecar)
+      const isPlaceholderBytes = Buffer.compare(bytes, PLACEHOLDER_JPEG_BYTES) === 0
+      const dims = await sharp(file).metadata()
+      Object.assign(record, {
+        bytes: bytes.length,
+        soi,
+        sidecar: hasSidecar,
+        placeholderBytes: isPlaceholderBytes,
+        width: dims.width,
+        height: dims.height
+      })
       if (result.placeholder) fail(`photo ${photo.id}: ensureThumbnail reported placeholder`)
-      files.push(row)
+      if (!soi) fail(`photo ${photo.id}: missing JPEG SOI marker`)
+      if (hasSidecar) fail(`photo ${photo.id}: unexpected placeholder sidecar`)
+      if (isPlaceholderBytes) fail(`photo ${photo.id}: bytes equal the placeholder constant`)
+      if (dims.width !== 320) fail(`photo ${photo.id}: width ${dims.width} is not 320`)
+      files.push(record)
     }
-
-    // ------------------------------------------------- whitelist rejection control
-    let whitelistBlocked = false
-    try {
-      await decodeWebpThumbnail(path.join(root, 'never-registered.webp'))
-    } catch (err) {
-      whitelistBlocked =
-        err instanceof BlinkThumbnailError && err.code === 'BLINK_NOT_WHITELISTED'
-    }
-    if (!whitelistBlocked) fail('unregistered abs_path was not rejected by the DB whitelist')
 
     // ---------------------------------------------------------- fallback control
-    // A registered webp whose source vanished must degrade to the placeholder +
-    // sidecar instead of throwing, proving the MediaQueue never stalls on helper failure.
     const ghostId = insertPhoto(
       db,
       batchId,
@@ -222,31 +186,29 @@ app.whenReady().then(async () => {
     const summary = {
       ok: failures.length === 0,
       electron: process.versions.electron,
-      chromium: process.versions.chrome,
+      chromium: process.versions.chromium,
       corpusWebp: allWebp.length,
       sampled: sample.length,
-      jpegControl,
-      whitelistBlocked,
+      sharpControl,
       fallbackPlaceholder: ghostOk,
+      sharpConcurrency: 1,
       decodeMs: {
         p50: Math.round(percentile(durations, 0.5) * 10) / 10,
         p95: Math.round(percentile(durations, 0.95) * 10) / 10,
         max: Math.round(Math.max(...durations) * 10) / 10
       },
+      rss: {
+        maxRssBytes: process.resourceUsage().maxRSS,
+        heapUsedBytes: process.memoryUsage().heapUsed
+      },
       failures,
       files
     }
     console.log(JSON.stringify(summary))
-    closeBlinkHelper()
     if (db.open) db.close()
     app.exit(failures.length === 0 ? 0 : 1)
   } catch (err) {
     console.error(JSON.stringify({ ok: false, fatal: String((err as Error)?.message ?? err) }))
-    try {
-      closeBlinkHelper()
-    } catch {
-      // Shutdown best effort.
-    }
     if (db?.open) db.close()
     app.exit(1)
   } finally {
