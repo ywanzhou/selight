@@ -21,6 +21,7 @@ interface Setup {
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
   enrichmentCalls: number[][]
+  retryCalls: { thumb: number[][]; photo: number[][] }
   sessionStore: SessionStore
   progressCalls: Array<[number, number]>
   mediaRoots: { thumbDir: string; previewDir: string }
@@ -55,6 +56,13 @@ function setup(): Setup {
     stop: () => undefined
   }
 
+  // Recording retry seam: cache deletion is covered by tests/media/retry.test.ts.
+  const retryCalls: { thumb: number[][]; photo: number[][] } = { thumb: [], photo: [] }
+  const retry = {
+    retryThumb: (id: number) => retryCalls.thumb.push([id]),
+    retryPreview: (id: number) => retryCalls.photo.push([id])
+  }
+
   // Fake session storage: the handler stays electron-free; the real file store is
   // covered in tests/domain/session.test.ts.
   const sessionStore: SessionStore = {
@@ -68,6 +76,7 @@ function setup(): Setup {
     db,
     thumbQueue,
     enrichment,
+    retry,
     mediaRoots,
     sessionStore,
     onExportProgress: (done, total) => progressCalls.push([done, total])
@@ -77,6 +86,7 @@ function setup(): Setup {
     db,
     queueCalls,
     enrichmentCalls,
+    retryCalls,
     sessionStore,
     progressCalls,
     mediaRoots
@@ -263,6 +273,14 @@ describe('IPC handler contract — full curation chain', () => {
     enrichmentCalls.length = 0
     await handlers.openBatch(batch.id)
     expect(enrichmentCalls).toHaveLength(0)
+  })
+
+  it('retryMedia dispatches to the matching thumb or preview retry seam', async () => {
+    const { handlers, retryCalls } = setup()
+    await handlers.retryMedia(7, 'thumb')
+    await handlers.retryMedia(9, 'photo')
+    expect(retryCalls.thumb).toEqual([[7]])
+    expect(retryCalls.photo).toEqual([[9]])
   })
 
   it('unassign moves folder photos back to inbox through the handler and one undo restores them', async () => {

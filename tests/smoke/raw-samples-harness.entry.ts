@@ -120,7 +120,7 @@ app.whenReady().then(async () => {
     // Same registration production main.ts uses; routes resolve against the temp
     // roots and this harness DB only. The harness pre-generates every thumbnail,
     // so the 404 enqueue seam can stay a no-op.
-    registerMediaProtocol(db, { thumbDir, previewDir }, () => undefined)
+    registerMediaProtocol(db, { thumbDir, previewDir }, () => undefined, () => undefined)
 
     const rows = db
       .prepare(

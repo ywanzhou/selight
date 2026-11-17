@@ -49,11 +49,12 @@ export interface EnrichProgressEvent {
   total: number
 }
 
-// Main → renderer: one thumbnail finished generation. ok:false means a permanent
-// placeholder was written and no further retry will happen automatically.
+// Main → renderer: one media artifact finished generation. ok:false means a
+// permanent placeholder was written and no further retry happens automatically.
+// kind aligns with the selight:// route hosts (thumb / photo).
 export interface MediaReadyEvent {
   id: number
-  kind: 'thumb'
+  kind: MediaKind
   ok: boolean
 }
 
@@ -80,6 +81,8 @@ export interface SelightHandlers {
   counts(batchId: number): Promise<Counts>
   mediaUrl(photoId: number, kind: MediaKind): Promise<string>
   markSelection(ids: number[]): Promise<void>
+  /** Clear a placeholder artifact and re-enqueue generation for manual retry. */
+  retryMedia(photoId: number, kind: MediaKind): Promise<void>
 
   assign(photoIds: number[], folderId: number): Promise<number>
   trash(photoIds: number[]): Promise<number>
@@ -136,6 +139,7 @@ export const IPC_CHANNELS = {
   photoCounts: 'selight:photo:counts',
   photoMediaUrl: 'selight:photo:media-url',
   photoMarkSelection: 'selight:photo:mark-selection',
+  mediaRetry: 'selight:media:retry',
   classifyAssign: 'selight:classify:assign',
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',

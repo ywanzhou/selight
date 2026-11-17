@@ -175,30 +175,56 @@ describe('resolveMediaPath — thumb route', () => {
   })
 })
 
-describe('resolveMediaPath — photo route (phase 2: original bytes still served)', () => {
-  it('serves a registered direct-format source file even when it lives outside the roots', () => {
+describe('resolveMediaPath — photo route (preview cache only, never source bytes)', () => {
+  it('never serves a direct-format source file, reporting not-generated until the preview exists', () => {
     const { db, roots, outside } = tempLayout()
     const absPath = path.join(outside, 'photo.jpg')
     touch(absPath)
     const id = insertPhoto(db, outside, 'photo.jpg', { absPath })
 
-    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
-      ok: true,
-      file: path.resolve(absPath)
-    })
-  })
-
-  it('reports not-generated when a direct-format source file has vanished from disk', () => {
-    const { db, roots, outside } = tempLayout()
-    const absPath = path.join(outside, 'vanish.jpg')
-    touch(absPath)
-    const id = insertPhoto(db, outside, 'vanish.jpg', { absPath })
-    fs.rmSync(absPath)
+    // The read-only source exists on disk but the photo route must not expose it.
     expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
       ok: false,
       reason: 'not-generated',
       id
     })
+
+    touch(path.join(roots.previewDir, `${id}.jpg`))
+    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
+      ok: true,
+      file: path.resolve(roots.previewDir, `${id}.jpg`)
+    })
+  })
+
+  it('reports not-generated for a direct-format row whose preview has not been built', () => {
+    const { db, roots, outside } = tempLayout()
+    const id = insertPhoto(db, outside, 'vanish.jpg')
+    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
+      ok: false,
+      reason: 'not-generated',
+      id
+    })
+  })
+
+  it('dedupes repeated photo-route 404s through a real MediaQueue', async () => {
+    const { db, roots, outside } = tempLayout()
+    const id = insertPhoto(db, outside, 'a.jpg')
+    const runs: number[] = []
+    const queue = new MediaQueue(async (jobId) => {
+      runs.push(jobId)
+    })
+    const onMissing = (missingId: number): void => {
+      queue.enqueue([missingId])
+    }
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = resolveMediaPath(db, roots, 'photo', id)
+      if (result.ok === false && result.reason === 'not-generated') onMissing(result.id)
+    }
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+
+    expect(runs).toEqual([id])
+    queue.stop()
   })
 
   it('serves RAW photos only from the preview cache, never the source path', () => {

@@ -40,6 +40,11 @@ export interface HandlerDeps {
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   /** Background metadata enrichment (orientation/dimensions); main.ts wires the real service. */
   enrichment: Pick<EnrichmentService, 'submit'>
+  /** Manual placeholder retry: main.ts clears the cache file and re-enqueues. */
+  retry: {
+    retryThumb(id: number): void
+    retryPreview(id: number): void
+  }
   /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
   mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>
@@ -90,7 +95,8 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, enrichment, mediaRoots, sessionStore, onExportProgress } = deps
+  const { db, thumbQueue, enrichment, retry, mediaRoots, sessionStore, onExportProgress } =
+    deps
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -186,6 +192,11 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
 
     async markSelection(ids) {
       thumbQueue.prioritize(ids)
+    },
+
+    async retryMedia(photoId, kind) {
+      if (kind === 'thumb') retry.retryThumb(photoId)
+      else retry.retryPreview(photoId)
     },
 
     // ---- classification ---------------------------------------------------

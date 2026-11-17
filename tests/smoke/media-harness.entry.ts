@@ -21,6 +21,7 @@ import {
   PLACEHOLDER_JPEG_BYTES,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
+import { ensurePreview } from '../../electron/media/previews'
 import { ExiftoolReader } from '../../electron/media/rawPreview'
 import { exiftool } from 'exiftool-vendored'
 
@@ -177,6 +178,47 @@ app.whenReady().then(async () => {
       files.push(record)
     }
 
+    // ------------------------------- large-image preview RSS hardening (backlog #2)
+    // An 8000x6000 source would need ~192MB as a raw RGBA buffer; shrink-on-load
+    // must keep the long edge at 2048 without a proportional memory blow-up.
+    const hugeFile = path.join(root, 'huge.jpg')
+    await sharp({
+      create: {
+        width: 8000,
+        height: 6000,
+        channels: 3,
+        background: { r: 40, g: 60, b: 80 }
+      }
+    })
+      .jpeg()
+      .toFile(hugeFile)
+    const hugeId = insertPhoto(db, batchId, sourceId, hugeFile, '.jpg')
+    const rssBeforeKb = process.resourceUsage().maxRSS
+    const hugeResult = await ensurePreview(
+      {
+        id: hugeId,
+        absPath: hugeFile,
+        ext: '.jpg',
+        orientation: 1,
+        width: 8000,
+        missing: 0
+      },
+      { thumbDir, previewDir }
+    )
+    const rssAfterKb = process.resourceUsage().maxRSS
+    const hugeMeta = await sharp(hugeResult.path).metadata()
+    const hugeImage = {
+      placeholder: hugeResult.placeholder,
+      width: hugeMeta.width,
+      height: hugeMeta.height,
+      rssDeltaKb: rssAfterKb - rssBeforeKb,
+      rssTotalKb: rssAfterKb
+    }
+    if (hugeResult.placeholder) fail('large image preview fell back to placeholder')
+    if (Math.max(hugeMeta.width ?? 0, hugeMeta.height ?? 0) !== 2048) {
+      fail(`large image preview long edge is not 2048: ${hugeMeta.width}x${hugeMeta.height}`)
+    }
+
     // ---------------------------------------------------------- fallback control
     const ghostId = insertPhoto(
       db,
@@ -285,6 +327,7 @@ app.whenReady().then(async () => {
         heapUsedBytes: process.memoryUsage().heapUsed
       },
       rawSelfHeal,
+      hugeImage,
       failures,
       files
     }

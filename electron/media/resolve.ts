@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import type { MediaKind } from '../shared/api'
-import { RAW_EXTENSIONS } from './formats'
 
 export interface MediaRoots {
   thumbDir: string
@@ -63,19 +62,13 @@ export function resolveMediaPath(
       : { ok: false, reason: 'not-generated', id }
   }
 
-  if (RAW_EXTENSIONS.has(row.ext.toLowerCase())) {
-    const candidate = path.resolve(roots.previewDir, `${id}.jpg`)
-    if (!candidate.startsWith(path.resolve(roots.previewDir) + path.sep)) {
-      return { ok: false, reason: 'forbidden' }
-    }
-    return fs.existsSync(candidate)
-      ? { ok: true, file: candidate }
-      : { ok: false, reason: 'not-generated', id }
+  // Both RAW and direct formats serve only the generated 2048px preview: the
+  // read-only source bytes must never reach the renderer (phase 3 invariant).
+  const candidate = path.resolve(roots.previewDir, `${id}.jpg`)
+  if (!candidate.startsWith(path.resolve(roots.previewDir) + path.sep)) {
+    return { ok: false, reason: 'forbidden' }
   }
-
-  // Direct-read formats are still served from the read-only source in phase 2;
-  // phase 3 swaps this branch for the 2048px preview cache.
-  return fs.existsSync(row.abs_path)
-    ? { ok: true, file: path.resolve(row.abs_path) }
+  return fs.existsSync(candidate)
+    ? { ok: true, file: candidate }
     : { ok: false, reason: 'not-generated', id }
 }
