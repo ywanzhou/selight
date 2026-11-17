@@ -123,17 +123,18 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
       <CreateBatchButton />
 
+      {/* Text button rather than a second TrashIcon: cache cleanup is safe and
+          reversible, unlike the adjacent destructive batch-delete action. */}
       <button
         type="button"
-        className="icon-btn"
-        title="清理失效缓存"
-        aria-label="清理失效缓存"
+        className="tb-btn"
+        title="清理失效的缩略图与预览缓存"
         disabled={loading}
         onClick={() => {
           handleCleanupCache().catch(showError)
         }}
       >
-        <TrashIcon />
+        清缓存
       </button>
 
       {importing ? (

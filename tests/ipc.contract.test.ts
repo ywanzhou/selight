@@ -278,6 +278,25 @@ describe('IPC handler contract — full curation chain', () => {
     expect(enrichmentCalls).toHaveLength(0)
   })
 
+  it('cancelImport during discovery returns an empty result and writes no rows', async () => {
+    const { handlers, db, enrichmentCalls } = setup()
+    const batch = await handlers.createBatch()
+    const root = makeFixtureTree()
+
+    // Do not await: cancel while the fs walk is suspended in its first readdir,
+    // so the abort check at the next walk boundary throws AbortError.
+    const inFlight = handlers.importDirectory(batch.id, root)
+    handlers.cancelImport()
+    const result = await inFlight
+
+    expect(result).toEqual({ added: 0, updated: 0, missing: 0, failures: [] })
+    expect(
+      (db.prepare('SELECT COUNT(*) AS n FROM photos').get() as { n: number }).n
+    ).toBe(0)
+    // The aborted import never reached the enrichment submission.
+    expect(enrichmentCalls).toEqual([])
+  })
+
   it('cancelImport cancels enrichment and remains safe with no active scan', async () => {
     const { handlers, enrichment } = setup()
     await handlers.cancelImport()

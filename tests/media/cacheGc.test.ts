@@ -110,6 +110,15 @@ describe('planCacheCleanup', () => {
     expect(planCacheCleanup(db, roots)).toContain(orphanSidecar)
   })
 
+  it('collects atomic-write .tmp leftovers even for live ids', () => {
+    const { db, roots } = setup()
+    const id = addPhoto(db, 'E:/source/a.jpg')
+    const tmp = path.join(roots.thumbDir, `${id}.jpg.tmp`)
+    fs.writeFileSync(tmp, 'partial')
+
+    expect(planCacheCleanup(db, roots)).toContain(tmp)
+  })
+
   it('never addresses files outside the cache roots and ignores non-managed names', () => {
     const { db, roots, sourceDir } = setup()
     const source = path.join(sourceDir, 'original.jpg')

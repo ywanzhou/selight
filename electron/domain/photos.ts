@@ -162,12 +162,18 @@ export function findUnenrichedPhotoIds(db: Database, batchId: number): number[] 
 
 // Backfill candidates: enriched rows whose thumbnail may still be missing.
 // fs-level existence is checked by the caller; this stays a pure SQL selector.
-export function findEnrichedPhotoIds(db: Database, limit: number): number[] {
+// offset lets the backfill scheduler page past rows already inspected so a
+// fixed limit cannot trap it on the first id window forever.
+export function findEnrichedPhotoIds(
+  db: Database,
+  limit: number,
+  offset = 0
+): number[] {
   const rows = db
     .prepare(
-      'SELECT id FROM photos WHERE width IS NOT NULL ORDER BY id LIMIT ?'
+      'SELECT id FROM photos WHERE width IS NOT NULL ORDER BY id LIMIT ? OFFSET ?'
     )
-    .all(limit) as { id: number }[]
+    .all(limit, offset) as { id: number }[]
   return rows.map((row) => row.id)
 }
 

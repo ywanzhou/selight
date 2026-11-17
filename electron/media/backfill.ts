@@ -5,11 +5,11 @@ import type { MediaQueue } from './queue'
 import type { MediaRoots } from './resolve'
 
 // Idle backfill, the automatic counterpart of viewport-driven generation:
-// whenever the thumbnail queue drains, fill one batch of enriched rows whose
-// thumbnail does not exist yet. Ordinary enqueue (not prioritize) means
-// viewport signals still jump ahead of background work. Existing artifacts,
-// including permanent placeholders, are never overwritten here — placeholder
-// recovery is the user's explicit retryMedia action.
+// whenever the thumbnail queue drains, page through enriched rows and enqueue
+// those whose thumbnail does not exist yet. Ordinary enqueue (not prioritize)
+// means viewport signals still jump ahead of background work. Existing
+// artifacts, including permanent placeholders, are never overwritten here —
+// placeholder recovery is the user's explicit retryMedia action.
 export function scheduleThumbnailBackfill(
   db: Database,
   queue: Pick<MediaQueue, 'enqueue' | 'onIdle'>,
@@ -17,9 +17,6 @@ export function scheduleThumbnailBackfill(
   batchSize = 50
 ): void {
   const run = (): void => {
-    const candidates = findEnrichedPhotoIds(db, batchSize)
-    if (candidates.length === 0) return
-
     let existing: Set<string>
     try {
       existing = new Set(fs.readdirSync(roots.thumbDir))
@@ -27,7 +24,26 @@ export function scheduleThumbnailBackfill(
       existing = new Set()
     }
 
-    const missing = candidates.filter((id) => !existing.has(`${id}.jpg`))
+    // Page through ALL enriched candidates. A fixed LIMIT without OFFSET
+    // would keep returning the first saturated window once its thumbnails
+    // exist, stranding every later id.
+    const missing: number[] = []
+    let offset = 0
+    for (;;) {
+      const candidates = findEnrichedPhotoIds(db, batchSize, offset)
+      if (candidates.length === 0) break
+      for (const id of candidates) {
+        // A placeholder sidecar means generation was already attempted and
+        // failed: do not self-sustain a retry loop on an unwritable disk.
+        if (existing.has(`${id}.jpg`) || existing.has(`${id}.jpg.placeholder`)) {
+          continue
+        }
+        missing.push(id)
+      }
+      if (candidates.length < batchSize) break
+      offset += batchSize
+    }
+
     if (missing.length > 0) queue.enqueue(missing)
   }
 

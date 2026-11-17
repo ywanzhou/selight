@@ -104,6 +104,47 @@ describe('scheduleThumbnailBackfill', () => {
     queue.stop()
   })
 
+  it('paginates past the first batch so every enriched row is eventually backfilled', async () => {
+    const { db, thumbDir, addPhoto } = setup()
+    const batchId = createBatch(db).id
+    const count = 65
+    for (let i = 0; i < count; i += 1) {
+      addPhoto(path.join(thumbDir, '..', `p${i}.jpg`))
+    }
+    db.prepare('UPDATE photos SET width = 100, height = 80 WHERE width IS NULL').run()
+
+    const enqueued: number[][] = []
+    const queue = new MediaQueue(async () => {
+      // Simulate the worker writing its artifact so fs filtering moves on.
+      await Promise.resolve()
+    })
+    const originalEnqueue = queue.enqueue.bind(queue)
+    queue.enqueue = (ids: number[]) => {
+      enqueued.push([...ids])
+      for (const id of ids) {
+        fs.writeFileSync(path.join(thumbDir, `${id}.jpg`), 'x')
+      }
+      originalEnqueue(ids)
+    }
+    scheduleThumbnailBackfill(db, queue, { thumbDir, previewDir: '' }, 50)
+
+    // Two drain transitions: the first fills ids 1..50, the second must page
+    // past them to reach the remaining 15 instead of re-querying the same window.
+    queue.enqueue([999_999])
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+    queue.enqueue([999_998])
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+
+    // Exclude the dummy ids used to trigger drain transitions.
+    const backfilled = new Set(
+      enqueued.flat().filter((id) => id < 900_000)
+    )
+    expect(backfilled.size).toBe(count)
+    expect(Math.max(...backfilled)).toBe(count)
+    queue.stop()
+    void batchId
+  })
+
   it('uses ordinary enqueue (not prioritize) so viewport signals keep overtaking', async () => {
     const { db, thumbDir, addPhoto } = setup()
     addPhoto('E:/1.jpg')

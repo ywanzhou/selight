@@ -5,6 +5,8 @@ import type { MediaRoots } from './resolve'
 
 const MAIN_RE = /^(\d+)\.jpg$/
 const SIDECAR_RE = /^(\d+)\.jpg\.placeholder$/
+// Leftover from an atomicWrite whose rename never completed (crash mid-write).
+const TMP_RE = /^(\d+)\.jpg\.tmp$/
 
 // Pure planning step (read-only): returns absolute paths safe to delete.
 // A managed artifact is garbage when its photo row is gone or flagged
@@ -29,12 +31,14 @@ export function planCacheCleanup(db: Database, roots: MediaRoots): string[] {
     for (const name of entries) {
       const sidecar = SIDECAR_RE.exec(name)
       const main = MAIN_RE.exec(name)
-      if (!sidecar && !main) continue
+      const tmp = TMP_RE.exec(name)
+      if (!sidecar && !main && !tmp) continue
 
-      const id = Number((sidecar ?? main)![1])
+      const id = Number((sidecar ?? main ?? tmp)![1])
       const file = path.join(dir, name)
 
-      if (!liveIds.has(id)) {
+      // Crash leftovers and any artifact whose row is gone are always garbage.
+      if (tmp || !liveIds.has(id)) {
         removable.push(file)
         continue
       }
