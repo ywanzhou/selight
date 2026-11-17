@@ -19,12 +19,13 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 // Thin Electron shell: all authorization lives in the pure resolveMediaPath so it
-// can be unit-tested without Electron. A thumb cache miss enqueues the id so the
-// on-demand queue generates it and the renderer gets a media-ready event later.
+// can be unit-tested without Electron. A cache miss enqueues the id on the matching
+// on-demand queue so the renderer gets a media-ready event after generation.
 export function registerMediaProtocol(
   db: Database,
   roots: MediaRoots,
-  onThumbMissing: (id: number) => void
+  onThumbMissing: (id: number) => void,
+  onPhotoMissing: (id: number) => void
 ): void {
   protocol.handle('selight', async (request) => {
     try {
@@ -40,10 +41,11 @@ export function registerMediaProtocol(
         decodeURIComponent(url.pathname.slice(1))
       )
       if (result.ok === false) {
-        if (result.reason === 'not-generated' && url.hostname === 'thumb') {
-          // MediaQueue dedupes repeated calls, so rapid grid remounts cannot
-          // fan out duplicate workers for the same id.
-          onThumbMissing(result.id)
+        if (result.reason === 'not-generated') {
+          // MediaQueue dedupes repeated calls, so rapid remounts cannot fan
+          // out duplicate workers for the same id.
+          if (url.hostname === 'thumb') onThumbMissing(result.id)
+          else onPhotoMissing(result.id)
         }
         return new Response('Not found', {
           status: result.reason === 'forbidden' ? 403 : 404

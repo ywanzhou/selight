@@ -6,6 +6,7 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from './db/schema'
 import { ExiftoolReader } from './media/rawPreview'
 import { createThumbnailQueue } from './media/thumbnails'
+import { createPreviewQueue } from './media/previews'
 import { EnrichmentService } from './media/enrich'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
@@ -18,6 +19,7 @@ import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './sh
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
 let thumbQueue: MediaQueue | null = null
+let previewQueue: MediaQueue | null = null
 let enrichment: EnrichmentService | null = null
 let sessionStore: SessionStore | null = null
 let isQuitting = false
@@ -70,10 +72,6 @@ app.whenReady().then(() => {
   fs.mkdirSync(previewDir, { recursive: true })
   const roots = { thumbDir, previewDir }
 
-  // A 404 on the thumb route enqueues on-demand generation; the queue dedupes
-  // rapid repeated requests for the same id.
-  registerMediaProtocol(db, roots, (id) => thumbQueue?.enqueue([id]))
-
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(
     db,
@@ -82,6 +80,22 @@ app.whenReady().then(() => {
     (id, ok) => {
       mainWindow?.webContents.send(IPC_CHANNELS.mediaReady, { id, kind: 'thumb', ok })
     }
+  )
+  previewQueue = createPreviewQueue(
+    db,
+    roots,
+    exifReader,
+    (id, ok) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.mediaReady, { id, kind: 'photo', ok })
+    }
+  )
+  // A 404 on either route enqueues on-demand generation; each queue dedupes
+  // rapid repeated requests for the same id.
+  registerMediaProtocol(
+    db,
+    roots,
+    (id) => thumbQueue?.enqueue([id]),
+    (id) => previewQueue?.enqueue([id])
   )
   enrichment = new EnrichmentService(db, exifReader, {
     onProgress: (done, total) => {
@@ -262,6 +276,7 @@ app.on('will-quit', (event) => {
       sessionStore?.flush()
       // Stop starting new background work; in-flight tasks are allowed to finish.
       thumbQueue?.stop()
+      previewQueue?.stop()
       enrichment?.stop()
       try {
         db?.close()
