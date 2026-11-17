@@ -262,6 +262,30 @@ button:disabled {
   color: var(--color-tertiary);
 }
 
+.preview-loading {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid #d8d8dc;
+  border-top-color: var(--color-accent, #5b6ee1);
+  animation: selight-spin 0.9s linear infinite;
+}
+
+@keyframes selight-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.preview-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--color-tertiary);
+}
+
 .nav-circle {
   position: absolute;
   top: 50%;

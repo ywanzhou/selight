@@ -19,8 +19,8 @@ describe('shouldReloadMedia', () => {
   })
 
   it('returns false when the kind differs', () => {
-    // Phase 2 only emits thumb events; the preview kind arrives in phase 3.
-    expect(shouldReloadMedia(event({ kind: 'thumb' }), 7, 'preview' as never)).toBe(false)
+    expect(shouldReloadMedia(event({ kind: 'thumb' }), 7, 'photo')).toBe(false)
+    expect(shouldReloadMedia(event({ kind: 'photo' }), 7, 'thumb')).toBe(false)
   })
 
   it('returns false on ok:false — the placeholder sidecar is already the final state', () => {

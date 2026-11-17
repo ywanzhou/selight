@@ -4,6 +4,7 @@ import { useMediaUrl } from '../hooks/useMediaUrl'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
 import { DROP_MIME, dragPhotoIds } from '../state/drop'
+import { derivePreviewState } from '../state/previewState'
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 
 function formatSize(sizeBytes: number): string {
@@ -11,35 +12,74 @@ function formatSize(sizeBytes: number): string {
 }
 
 // Always invokes the media hook (rules of hooks); the missing flag or a failed
-// load replaces the image with an unavailability message instead of breaking it.
+// load replaces the image with an explicit state instead of breaking the hook.
 function StageImage({ photo }: { photo: PhotoRow }) {
   const src = useMediaUrl(photo.id, 'photo')
-  const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [photo.id])
+  const [loaded, setLoaded] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
 
-  if (photo.missing === 1 || failed) {
+  // A new URL (initial load or a media-ready nonce bump) restarts the settled
+  // state so a stale failure cannot mask a regenerated preview.
+  useEffect(() => {
+    setLoaded(false)
+    setLoadFailed(false)
+  }, [src])
+
+  const state = derivePreviewState({
+    missing: photo.missing === 1,
+    loadFailed,
+    loaded
+  })
+
+  async function handleRetry(): Promise<void> {
+    setLoadFailed(false)
+    try {
+      await window.selight.retryMedia(photo.id, 'photo')
+    } catch {
+      setLoadFailed(true)
+    }
+  }
+
+  if (state === 'missing') {
     return (
       <p className="stage-msg" role="status">
         原文件缺失，暂时无法预览
       </p>
     )
   }
-  if (src === undefined) return null
+  if (state === 'failed') {
+    return (
+      <div className="preview-failed" role="alert">
+        <p>预览生成失败</p>
+        <button type="button" className="tb-btn" onClick={() => void handleRetry()}>
+          重试
+        </button>
+      </div>
+    )
+  }
+
   return (
-    // key=src mirrors ThumbCell: a new photo in this slot remounts the img so
-    // an inline error state from the previous one cannot stick.
-    <img
-      key={src}
-      src={src}
-      alt={photo.filename}
-      draggable={false}
-      onError={() => setFailed(true)}
-    />
+    <>
+      {state === 'loading' && <div className="preview-loading" aria-hidden="true" />}
+      {src && (
+        // key=src mirrors ThumbCell: a nonce bump remounts the img so the
+        // request for the regenerated preview actually fires.
+        <img
+          key={src}
+          src={src}
+          alt={photo.filename}
+          draggable={false}
+          style={{ visibility: state === 'ready' ? 'visible' : 'hidden' }}
+          onLoad={() => setLoaded(true)}
+          onError={() => setLoadFailed(true)}
+        />
+      )}
+    </>
   )
 }
 
 function MetaBar({ photo }: { photo: PhotoRow }) {
-  const parts = [photo.filename]
+  const parts: string[] = [photo.filename]
   if (photo.width !== null && photo.height !== null) {
     parts.push(`${photo.width} × ${photo.height}`)
   }
@@ -63,17 +103,13 @@ export default function PreviewPane() {
   const { state } = useAppStore()
   const { photos } = state
   const { anchor, orderedIds, navigate, selected, toggle } = useSelectionContext()
-  const photo = anchor === null ? undefined : photos.find((p) => p.id === anchor)
   const anchorIndex = anchor === null ? -1 : orderedIds.indexOf(anchor)
+  const photo = anchor === null ? undefined : photos.find((p) => p.id === anchor)
 
-  // Same drag contract as the thumbnail grid: the payload is the whole
-  // selection, or just the previewed photo when it is not part of it.
   const handleDragStart = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       if (anchor === null) return
-      const ids = dragPhotoIds([...selected], anchor)
-      if (!selected.has(anchor)) toggle(anchor)
-      e.dataTransfer.setData(DROP_MIME, JSON.stringify(ids))
+      e.dataTransfer.setData(DROP_MIME, JSON.stringify(dragPhotoIds([...selected], anchor)))
       e.dataTransfer.effectAllowed = 'move'
     },
     [anchor, selected, toggle]
