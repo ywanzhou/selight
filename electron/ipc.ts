@@ -24,6 +24,7 @@ import { importScanned, scanDirectory } from './scanner'
 import { exportBatch as runExport } from './exporter'
 import type { EnrichmentService } from './media/enrich'
 import type { MediaQueue } from './media/queue'
+import { runCacheCleanup } from './media/cacheGc'
 import type { SessionStore } from './session'
 import type {
   ImportResult,
@@ -218,6 +219,10 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
     async retryMedia(photoId, kind) {
       if (kind === 'thumb') retry.retryThumb(photoId)
       else retry.retryPreview(photoId)
+    },
+
+    async cleanupMediaCache() {
+      return runCacheCleanup(db, mediaRoots)
     },
 
     // ---- classification ---------------------------------------------------

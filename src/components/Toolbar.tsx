@@ -9,12 +9,24 @@ function showError(e: unknown): void {
 }
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
-  const { state, openBatch, importDirectory, cancelImport, deleteBatch, renameBatch } =
-    useAppStore()
+  const {
+    state,
+    openBatch,
+    importDirectory,
+    cancelImport,
+    deleteBatch,
+    renameBatch,
+    cleanupMediaCache
+  } = useAppStore()
   const { batches, batchId, counts, loading, enrichProgress } = state
   const [renaming, setRenaming] = useState(false)
   const [importing, setImporting] = useState(false)
   const currentName = batches.find((b) => b.id === batchId)?.name ?? ''
+
+  async function handleCleanupCache() {
+    const { removed } = await cleanupMediaCache()
+    if (removed > 0) window.alert(`已清理 ${removed} 个缓存文件`)
+  }
 
   const total = counts?.total ?? 0
   const classified = total - (counts?.inbox ?? 0)
@@ -110,6 +122,19 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
       </button>
 
       <CreateBatchButton />
+
+      <button
+        type="button"
+        className="icon-btn"
+        title="清理失效缓存"
+        aria-label="清理失效缓存"
+        disabled={loading}
+        onClick={() => {
+          handleCleanupCache().catch(showError)
+        }}
+      >
+        <TrashIcon />
+      </button>
 
       {importing ? (
         <button

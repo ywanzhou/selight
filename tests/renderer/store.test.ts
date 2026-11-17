@@ -42,6 +42,7 @@ const HANDLER_NAMES = [
   'mediaUrl',
   'markSelection',
   'retryMedia',
+  'cleanupMediaCache',
   'assign',
   'trash',
   'restore',

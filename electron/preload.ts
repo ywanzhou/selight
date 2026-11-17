@@ -29,6 +29,7 @@ const api: SelightApi = {
   markSelection: (ids) => ipcRenderer.invoke(IPC_CHANNELS.photoMarkSelection, ids),
   retryMedia: (photoId, kind) =>
     ipcRenderer.invoke(IPC_CHANNELS.mediaRetry, photoId, kind),
+  cleanupMediaCache: () => ipcRenderer.invoke(IPC_CHANNELS.mediaCacheCleanup),
 
   assign: (photoIds, folderId) =>
     ipcRenderer.invoke(IPC_CHANNELS.classifyAssign, photoIds, folderId),

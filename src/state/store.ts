@@ -291,6 +291,7 @@ export interface AppStore {
   cancelImport(): Promise<void>
   recoveryImport(): Promise<ImportResult | null>
   exportBatch(outputDir: string): Promise<ExportResult | null>
+  cleanupMediaCache(): Promise<{ removed: number }>
 }
 
 const StoreContext = createContext<AppStore | null>(null)
@@ -356,7 +357,8 @@ export function AppStoreProvider({
     importDirectory: () => importDirectory(deps),
     cancelImport: () => deps.api.cancelImport(),
     recoveryImport: () => recoveryImport(deps),
-    exportBatch: (outputDir) => exportBatch(deps, outputDir)
+    exportBatch: (outputDir) => exportBatch(deps, outputDir),
+    cleanupMediaCache: () => deps.api.cleanupMediaCache()
   }
   return createElement(StoreContext.Provider, { value: store }, children)
 }

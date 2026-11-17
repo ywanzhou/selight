@@ -181,6 +181,7 @@ app.whenReady().then(() => {
     IPC_CHANNELS.mediaRetry,
     (_event, photoId: number, kind: MediaKind) => handlers.retryMedia(photoId, kind)
   )
+  ipcMain.handle(IPC_CHANNELS.mediaCacheCleanup, () => handlers.cleanupMediaCache())
 
   ipcMain.handle(
     IPC_CHANNELS.classifyAssign,

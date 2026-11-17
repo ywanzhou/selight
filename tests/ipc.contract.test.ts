@@ -289,6 +289,28 @@ describe('IPC handler contract — full curation chain', () => {
     expect(state.batch.id).toBe(batch.id)
   })
 
+  it('cleanupMediaCache deletes orphan cache files and keeps live artifacts', async () => {
+    const { handlers, mediaRoots } = setup()
+    const root = makeFixtureTree()
+    const imported = await handlers.importDirectory((await handlers.createBatch()).id, root)
+    expect(imported.added).toBeGreaterThan(0)
+
+    const liveId = (await handlers.listView((await handlers.listBatches())[0].id, {
+      kind: 'inbox'
+    }))[0].id
+    fs.writeFileSync(path.join(mediaRoots.thumbDir, `${liveId}.jpg`), 'live')
+    const orphan = path.join(mediaRoots.thumbDir, '888888.jpg')
+    const orphanSidecar = path.join(mediaRoots.previewDir, '888888.jpg.placeholder')
+    fs.writeFileSync(orphan, 'orphan')
+    fs.writeFileSync(orphanSidecar, '')
+
+    const result = await handlers.cleanupMediaCache()
+    expect(fs.existsSync(orphan)).toBe(false)
+    expect(fs.existsSync(orphanSidecar)).toBe(false)
+    expect(fs.existsSync(path.join(mediaRoots.thumbDir, `${liveId}.jpg`))).toBe(true)
+    expect(result.removed).toBe(2)
+  })
+
   it('retryMedia dispatches to the matching thumb or preview retry seam', async () => {
     const { handlers, retryCalls } = setup()
     await handlers.retryMedia(7, 'thumb')

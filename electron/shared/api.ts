@@ -85,6 +85,8 @@ export interface SelightHandlers {
   markSelection(ids: number[]): Promise<void>
   /** Clear a placeholder artifact and re-enqueue generation for manual retry. */
   retryMedia(photoId: number, kind: MediaKind): Promise<void>
+  /** Remove orphaned/missing cache artifacts; returns the deleted file count. */
+  cleanupMediaCache(): Promise<{ removed: number }>
 
   assign(photoIds: number[], folderId: number): Promise<number>
   trash(photoIds: number[]): Promise<number>
@@ -143,6 +145,7 @@ export const IPC_CHANNELS = {
   photoMediaUrl: 'selight:photo:media-url',
   photoMarkSelection: 'selight:photo:mark-selection',
   mediaRetry: 'selight:media:retry',
+  mediaCacheCleanup: 'selight:media:cache-cleanup',
   classifyAssign: 'selight:classify:assign',
   classifyTrash: 'selight:classify:trash',
   classifyRestore: 'selight:classify:restore',
