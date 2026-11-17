@@ -153,7 +153,12 @@ app.whenReady().then(async () => {
       if (!soi) fail(`photo ${photo.id}: missing JPEG SOI marker`)
       if (hasSidecar) fail(`photo ${photo.id}: unexpected placeholder sidecar`)
       if (isPlaceholderBytes) fail(`photo ${photo.id}: bytes equal the placeholder constant`)
-      if (dims.width !== 320) fail(`photo ${photo.id}: width ${dims.width} is not 320`)
+      // fit-inside 320: the LONG edge is 320 for both landscape and portrait shots.
+      const longEdge = Math.max(dims.width ?? 0, dims.height ?? 0)
+      const shortEdge = Math.min(dims.width ?? 0, dims.height ?? 0)
+      if (longEdge !== 320 || shortEdge > 320) {
+        fail(`photo ${photo.id}: thumbnail ${dims.width}x${dims.height} is not fit-inside 320`)
+      }
       files.push(record)
     }
 
@@ -198,7 +203,8 @@ app.whenReady().then(async () => {
         max: Math.round(Math.max(...durations) * 10) / 10
       },
       rss: {
-        maxRssBytes: process.resourceUsage().maxRSS,
+        // Node reports resourceUsage().maxRSS in kilobytes across platforms.
+        maxRssKb: process.resourceUsage().maxRSS,
         heapUsedBytes: process.memoryUsage().heapUsed
       },
       failures,

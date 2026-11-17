@@ -1,23 +1,24 @@
-// Committed Electron smoke harness for Task 19's real-sample closed loop. Bundled
+// Committed Electron smoke harness for the real-sample closed loop. Bundled
 // by electron-vite into out/main/raw-harness.js and launched through
 // tests/smoke/electron-raw-samples-harness.cjs (which also verifies process-tree
 // cleanup with taskkill /T + a WMI zero-remainder check).
 //
 // It drives the REAL production modules inside Electron:
-//   scanDirectory/importScanned -> ensureRawPreview -> ensureThumbnail(nativeImage)
+//   scanDirectory/importScanned -> ensureRawPreview -> ensureThumbnail(sharp)
 //   -> selight://thumb/<id> and selight://photo/<id> protocol routes.
-// NativeImage decodes JPEG reliably (only webp needs the Blink helper), so every
-// orientation assertion below is a real pixel-frame decode, not a byte check.
+// Frame dimensions come from sharp metadata, so every orientation assertion
+// below is a real decoded-frame check, not a byte check.
 //
 // Enable exactly like tests/smoke/raw-samples.test.ts: drop 3-5 real files into
 // <repo>/samples/ (gitignored), incl. a vertical ARW with source EXIF 6/8 and a
 // normal JPG. Without samples/ the harness prints {"skipped": true} and exits 0.
 // Exit code 1 means the production RAW/orientation pipeline is broken on real files.
-import { app, nativeImage, net } from 'electron'
+import { app, net } from 'electron'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
+import sharp from 'sharp'
 import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
@@ -50,6 +51,11 @@ function walkSupported(dir: string): string[] {
 
 function isJpeg(bytes: Buffer): boolean {
   return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+}
+
+async function jpegSize(bytes: Buffer): Promise<{ width: number; height: number }> {
+  const meta = await sharp(bytes).metadata()
+  return { width: meta.width ?? 0, height: meta.height ?? 0 }
 }
 
 function expectVertical(orientation: number): boolean {
@@ -143,10 +149,10 @@ app.whenReady().then(async () => {
       if (Buffer.compare(thumbBytes, PLACEHOLDER_JPEG_BYTES) === 0) {
         fail(`${photo.absPath}: thumbnail bytes equal the placeholder constant`)
       }
-      const thumbDims = nativeImage.createFromBuffer(thumbBytes).getSize()
+      const thumbDims = await jpegSize(thumbBytes)
       record.thumb = { width: thumbDims.width, height: thumbDims.height }
       if (thumbDims.width === 0 || thumbDims.height === 0) {
-        fail(`${photo.absPath}: nativeImage decoded an empty thumbnail`)
+        fail(`${photo.absPath}: sharp decoded an empty thumbnail`)
       }
       if (verticalExpected && thumbDims.width >= thumbDims.height) {
         fail(
@@ -162,7 +168,7 @@ app.whenReady().then(async () => {
       } else {
         const routed = Buffer.from(await thumbRes.arrayBuffer())
         if (!isJpeg(routed)) fail(`${photo.absPath}: thumb route returned non-JPEG bytes`)
-        const routedDims = nativeImage.createFromBuffer(routed).getSize()
+        const routedDims = await jpegSize(routed)
         record.thumbRoute = { width: routedDims.width, height: routedDims.height }
         if (routedDims.width !== thumbDims.width || routedDims.height !== thumbDims.height) {
           fail(
@@ -181,7 +187,7 @@ app.whenReady().then(async () => {
         if (isRaw) {
           // RAW is never served directly: only the extracted, rotated preview cache.
           if (!isJpeg(routed)) fail(`${photo.absPath}: photo route returned non-JPEG preview`)
-          const previewDims = nativeImage.createFromBuffer(routed).getSize()
+          const previewDims = await jpegSize(routed)
           record.photoRoute = { width: previewDims.width, height: previewDims.height }
           if (verticalExpected && previewDims.width >= previewDims.height) {
             fail(
