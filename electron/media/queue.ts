@@ -38,6 +38,12 @@ export class MediaQueue {
     this.idleCallbacks.add(cb)
   }
 
+  // True when nothing is running or waiting. Lets callers distinguish "already
+  // drained" from "will drain later", since onIdle only fires on a transition.
+  get isIdle(): boolean {
+    return this.running === 0 && this.queued.length === 0
+  }
+
   // Shutdown gate: once stopped, enqueue/prioritize may still buffer ids but pump()
   // never starts another worker, so in-flight tasks finish naturally and nothing queued
   // after stop runs. Idle still fires when the last in-flight task lands.
