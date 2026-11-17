@@ -30,6 +30,8 @@ import {
 } from '../../electron/media/thumbnails'
 import { registerMediaProtocol } from '../../electron/media/protocol'
 import { RAW_EXTENSIONS } from '../../electron/media/formats'
+import { EnrichmentService } from '../../electron/media/enrich'
+import { ExiftoolReader } from '../../electron/media/rawPreview'
 
 const SAMPLES = path.resolve(__dirname, '..', '..', 'samples')
 const DIRECT_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
@@ -103,6 +105,17 @@ app.whenReady().then(async () => {
     if (imported.added !== sampleFiles.length) {
       fail(`imported ${imported.added} rows but disk holds ${sampleFiles.length} files`)
     }
+
+    // Discovery is fs-only; run the production enrichment service so rows carry
+    // real EXIF orientation/dimensions before the thumbnail/route assertions.
+    const enrichment = new EnrichmentService(db, new ExiftoolReader())
+    enrichment.submit(
+      (db.prepare('SELECT id FROM photos ORDER BY id').all() as { id: number }[]).map(
+        (r) => r.id
+      )
+    )
+    await enrichment.whenIdle()
+    enrichment.stop()
 
     // Same registration production main.ts uses; routes resolve against the temp
     // roots and this harness DB only. The harness pre-generates every thumbnail,

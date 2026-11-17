@@ -75,7 +75,8 @@ function harness(api: SelightApi) {
     photos: [],
     counts: null,
     loading: true,
-    error: null
+    error: null,
+    enrichProgress: null
   }
   const dispatch = vi.fn((action: Parameters<typeof reducer>[1]) => {
     state = reducer(state, action)
@@ -106,7 +107,8 @@ function staleHarness(api: SelightApi) {
     photos: [],
     counts: null,
     loading: true,
-    error: null
+    error: null,
+    enrichProgress: null
   }
   let queued: Parameters<typeof reducer>[1][] = []
   let scheduled = false
@@ -647,6 +649,18 @@ describe('reducer', () => {
   it('returns the same state for unknown actions', () => {
     const state = harness(makeApi()).state
     expect(reducer(state, { type: 'unknown' } as never)).toBe(state)
+  })
+
+  it('stores enrichment progress and accepts an explicit clear', () => {
+    const state = harness(makeApi()).state
+    const running = reducer(state, {
+      type: 'enrich-progress',
+      progress: { done: 3, total: 10 }
+    })
+    expect(running.enrichProgress).toEqual({ done: 3, total: 10 })
+
+    const cleared = reducer(running, { type: 'enrich-progress', progress: null })
+    expect(cleared.enrichProgress).toBeNull()
   })
 
   it('closed resets an open batch back to the empty workspace', () => {

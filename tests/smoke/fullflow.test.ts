@@ -23,6 +23,9 @@ import {
   ensureThumbnail,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
+import { EnrichmentService } from '../../electron/media/enrich'
+import { ExiftoolReader } from '../../electron/media/rawPreview'
+import { exiftool } from 'exiftool-vendored'
 
 // The real corpus is never created or modified by this suite: every DB, cache and
 // export lands in os.tmpdir(), and the scanner only opens source files read-only.
@@ -189,6 +192,37 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     expect(row.d).toBe(row.n)
     expect(row.inbox).toBe(expectedPaths.length)
     expect(row.missing).toBe(0)
+
+    // Background enrichment drains every row: dimensions filled, display
+    // state consistent with orientation, and the whole pass stays bounded.
+    const service = new EnrichmentService(db, new ExiftoolReader())
+    const tEnrich0 = performance.now()
+    service.submit(
+      (db.prepare('SELECT id FROM photos ORDER BY id').all() as { id: number }[]).map(
+        (r) => r.id
+      )
+    )
+    await service.whenIdle()
+    const enrichMs = performance.now() - tEnrich0
+    service.stop()
+    await exiftool.end()
+    // eslint-disable-next-line no-console
+    console.log(`[smoke] enrichment ${scanned.length} rows in ${round1(enrichMs)}ms`)
+
+    const unenriched = (
+      db
+        .prepare('SELECT COUNT(*) AS n FROM photos WHERE width IS NULL')
+        .get() as { n: number }
+    ).n
+    expect(unenriched).toBe(0)
+    const swapped = db
+      .prepare(
+        'SELECT width, height FROM photos WHERE orientation IN (6, 8)'
+      )
+      .all() as { width: number; height: number }[]
+    for (const dims of swapped) {
+      expect(dims.width).toBeLessThan(dims.height)
+    }
   })
 
   // --------------------------------------------------------- 2. classify + undo

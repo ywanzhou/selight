@@ -29,6 +29,7 @@ import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { importScanned, scanDirectory } from '../../electron/scanner'
 import { ExiftoolReader } from '../../electron/media/rawPreview'
+import { EnrichmentService } from '../../electron/media/enrich'
 import { orientationToRotate } from '../../electron/media/orientation'
 import { RAW_EXTENSIONS } from '../../electron/media/formats'
 import type { ThumbnailPhoto } from '../../electron/media/thumbnails'
@@ -103,9 +104,20 @@ suite(
       const imported = importScanned(db, batchId, sourceId, scan.files)
       expect(imported).toEqual({ added: sampleFiles.length, updated: 0, missing: 0 })
 
+      // Discovery is fs-only: run the same background enrichment the app does
+      // so orientation/dimensions reflect the real files before assertions.
+      const service = new EnrichmentService(db, new ExiftoolReader())
+      service.submit(
+        (db.prepare('SELECT id FROM photos ORDER BY id').all() as { id: number }[]).map(
+          (r) => r.id
+        )
+      )
+      await service.whenIdle()
+      service.stop()
+
       rows = db
         .prepare(
-          'SELECT id, abs_path AS absPath, ext, orientation, missing FROM photos ORDER BY id'
+          'SELECT id, abs_path AS absPath, ext, orientation, width, missing FROM photos ORDER BY id'
         )
         .all() as ThumbnailPhoto[]
     }, SLOW)

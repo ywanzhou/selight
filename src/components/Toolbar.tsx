@@ -10,8 +10,9 @@ function showError(e: unknown): void {
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
   const { state, openBatch, importDirectory, deleteBatch, renameBatch } = useAppStore()
-  const { batches, batchId, counts, loading } = state
+  const { batches, batchId, counts, loading, enrichProgress } = state
   const [renaming, setRenaming] = useState(false)
+  const [importing, setImporting] = useState(false)
   const currentName = batches.find((b) => b.id === batchId)?.name ?? ''
 
   const total = counts?.total ?? 0
@@ -31,10 +32,17 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
   }
 
   async function handleImport() {
-    const result = await importDirectory()
-    // Import failures are skipped files, not fatal: surface them instead of failing silently.
-    if (result && result.failures.length > 0) {
-      window.alert(`部分文件未能导入：\n${result.failures.join('\n')}`)
+    // Discovery is fast but still async: block double clicks, which would
+    // submit overlapping scans against the same source.
+    setImporting(true)
+    try {
+      const result = await importDirectory()
+      // Import failures are skipped files, not fatal: surface them instead of failing silently.
+      if (result && result.failures.length > 0) {
+        window.alert(`部分文件未能导入：\n${result.failures.join('\n')}`)
+      }
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -100,13 +108,13 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
       <button
         type="button"
         className="tb-btn"
-        disabled={batchId === null || loading}
+        disabled={batchId === null || loading || importing}
         onClick={() => {
           handleImport().catch(showError)
         }}
       >
         <ImportIcon />
-        导入文件夹
+        {importing ? '导入中…' : '导入文件夹'}
       </button>
 
       {/* Wrapper span carries the tooltip: a disabled button itself never fires
@@ -125,6 +133,12 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
           导出
         </button>
       </span>
+
+      {enrichProgress !== null && (
+        <span className="tb-enrich" role="status">
+          正在处理 {enrichProgress.done}/{enrichProgress.total}
+        </span>
+      )}
 
       <div className="tb-progress">
         <span>

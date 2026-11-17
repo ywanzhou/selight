@@ -16,12 +16,16 @@ import type { Database } from 'better-sqlite3'
 import sharp from 'sharp'
 import { openDatabase } from '../../electron/db/schema'
 import {
+  createThumbnailQueue,
   ensureThumbnail,
   PLACEHOLDER_JPEG_BYTES,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
+import { ExiftoolReader } from '../../electron/media/rawPreview'
+import { exiftool } from 'exiftool-vendored'
 
 const CORPUS = path.resolve(__dirname, '..', '..', '素材')
+const SAMPLES = path.resolve(__dirname, '..', '..', 'samples')
 const SAMPLE_SIZE = 20
 
 function walkWebp(dir: string): string[] {
@@ -30,6 +34,16 @@ function walkWebp(dir: string): string[] {
     const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) out.push(...walkWebp(abs))
     else if (entry.isFile() && entry.name.toLowerCase().endsWith('.webp')) out.push(abs)
+  }
+  return out.sort()
+}
+
+function walkFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...walkFiles(abs))
+    else if (entry.isFile()) out.push(abs)
   }
   return out.sort()
 }
@@ -190,6 +204,43 @@ app.whenReady().then(async () => {
       Buffer.compare(fs.readFileSync(ghostFile), PLACEHOLDER_JPEG_BYTES) === 0
     if (!ghostOk) fail('missing-source webp did not degrade to the placeholder + sidecar')
 
+    // --------------------------------------------- RAW self-heal (samples only)
+    let rawSelfHeal: Record<string, unknown> | null = null
+    const sampleArw = fs.existsSync(SAMPLES)
+      ? walkFiles(SAMPLES).find((f) => f.toLowerCase().endsWith('.arw'))
+      : undefined
+    if (sampleArw) {
+      const rawId = insertPhoto(db, batchId, sourceId, sampleArw, '.arw')
+      const before = db
+        .prepare('SELECT width FROM photos WHERE id = ?')
+        .get(rawId) as { width: number | null }
+      const ready: Array<[number, boolean]> = []
+      const queue = createThumbnailQueue(
+        db,
+        { thumbDir, previewDir },
+        new ExiftoolReader(),
+        (id, ok) => ready.push([id, ok])
+      )
+      await new Promise<void>((resolve) => {
+        queue.onIdle(resolve)
+        queue.enqueue([rawId])
+      })
+      queue.stop()
+      const after = db
+        .prepare('SELECT orientation, width, height FROM photos WHERE id = ?')
+        .get(rawId) as { orientation: number; width: number | null; height: number | null }
+      rawSelfHeal = {
+        startedUnenriched: before.width === null,
+        enriched: after.width !== null,
+        ready: ready.at(-1),
+        vertical: after.orientation === 6 || after.orientation === 8
+      }
+      if (before.width !== null) fail('RAW fixture expected to start unenriched')
+      if (after.width === null) fail('RAW self-heal did not fill dimensions')
+      if (ready.at(-1)?.[1] !== true) fail('RAW thumbnail did not report ready ok:true')
+      await exiftool.end()
+    }
+
     const summary = {
       ok: failures.length === 0,
       electron: process.versions.electron,
@@ -210,6 +261,7 @@ app.whenReady().then(async () => {
         maxRssKb: process.resourceUsage().maxRSS,
         heapUsedBytes: process.memoryUsage().heapUsed
       },
+      rawSelfHeal,
       failures,
       files
     }
