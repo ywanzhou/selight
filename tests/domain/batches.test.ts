@@ -4,7 +4,18 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import { openDatabase } from '../../electron/db/schema'
-import { createBatch, getBatch, listBatches, touchBatch } from '../../electron/domain/batches'
+import {
+  BatchNotFoundError,
+  createBatch,
+  deleteBatch,
+  getBatch,
+  listBatches,
+  renameBatch,
+  touchBatch
+} from '../../electron/domain/batches'
+import { createFolder } from '../../electron/domain/folders'
+import { upsertPhoto } from '../../electron/domain/photos'
+import { assignToFolder } from '../../electron/domain/classify'
 
 const dirs: string[] = []
 const handles: Database[] = []
@@ -94,5 +105,71 @@ describe('batch domain module', () => {
   it('getBatch returns undefined for an unknown id', () => {
     const db = tempDb()
     expect(getBatch(db, 9999)).toBeUndefined()
+  })
+
+  it('deleteBatch removes the batch and all its child rows in one transaction, returning photo ids', () => {
+    const db = tempDb()
+    const batch = createBatch(db, '婚礼')
+    const other = createBatch(db, 'other')
+    const folder = createFolder(db, batch.id, '精选')
+    const sourceId = Number(
+      db.prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)').run(batch.id, 'E:/a')
+        .lastInsertRowid
+    )
+    const photoId = upsertPhoto(db, {
+      batchId: batch.id,
+      sourceId,
+      absPath: 'E:/a/1.jpg',
+      filename: '1.jpg',
+      ext: '.jpg',
+      sizeBytes: 1,
+      mtime: 1,
+      orientation: 1
+    }).row.id
+    // Produces an actions row referencing the batch, photo and folder.
+    assignToFolder(db, [photoId], folder.id)
+
+    expect(deleteBatch(db, batch.id)).toEqual([photoId])
+
+    expect(getBatch(db, batch.id)).toBeUndefined()
+    expect(listBatches(db).map((b) => b.id)).toEqual([other.id])
+    for (const table of ['photos', 'folders', 'sources', 'actions']) {
+      const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }
+      expect(n).toBe(0)
+    }
+  })
+
+  it('renameBatch changes the name without touching last_opened_at or ordering', () => {
+    const db = tempDb()
+    nextTick()
+    const first = createBatch(db, 'first')
+    nextTick()
+    const second = createBatch(db, 'second')
+    const before = getBatch(db, first.id)!
+
+    renameBatch(db, first.id, '婚礼正片')
+
+    const after = getBatch(db, first.id)!
+    expect(after.name).toBe('婚礼正片')
+    expect(after.lastOpenedAt).toBe(before.lastOpenedAt)
+    expect(after.createdAt).toBe(before.createdAt)
+    // Dropdown order is last_opened_at DESC and must not move on a rename.
+    expect(listBatches(db).map((b) => b.id)).toEqual([second.id, first.id])
+  })
+
+  it('renameBatch throws BatchNotFoundError on an unknown id', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    expect(() => renameBatch(db, 9999, 'x')).toThrowError(BatchNotFoundError)
+    expect(getBatch(db, batch.id)?.name).toBe(batch.name)
+  })
+
+  it('deleteBatch throws BatchNotFoundError on an unknown id and changes nothing', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+
+    expect(() => deleteBatch(db, 9999)).toThrowError(BatchNotFoundError)
+    expect(getBatch(db, batch.id)).toBeDefined()
+    expect(listBatches(db)).toHaveLength(1)
   })
 })

@@ -7,6 +7,12 @@ const MAX_NAME_LENGTH = 64
 interface InlineNameInputProps {
   initialValue?: string
   placeholder?: string
+  /**
+   * When true a blank entry commits '' for the caller to map to its default
+   * (batch creation falls back to the date name); default false keeps the
+   * folder-card behavior where blank means cancel.
+   */
+  allowBlank?: boolean
   onCommit(name: string): void
   onCancel(): void
 }
@@ -14,6 +20,7 @@ interface InlineNameInputProps {
 export default function InlineNameInput({
   initialValue = '',
   placeholder,
+  allowBlank = false,
   onCommit,
   onCancel
 }: InlineNameInputProps) {
@@ -33,8 +40,9 @@ export default function InlineNameInput({
     if (settledRef.current) return
     const name = (inputRef.current?.value ?? '').trim()
     settledRef.current = true
-    // A blank name is a cancel, never an IPC call with an empty string.
-    if (name === '') onCancel()
+    // A blank name is a cancel, never an IPC call with an empty string —
+    // unless the caller asked for blank-to-default semantics.
+    if (name === '' && !allowBlank) onCancel()
     else onCommit(name)
   }
 

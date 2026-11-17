@@ -496,6 +496,18 @@ button:disabled {
   text-align: center;
 }
 
+/* Inline batch naming: fixed-width slot replacing the 新建批次 button. */
+.batch-name-input {
+  width: 170px;
+  flex-shrink: 0;
+}
+
+/* Keeps the wrapped toolbar button in normal flow while the span owns the
+   disabled-state tooltip (disabled buttons emit no mouse events themselves). */
+.tb-btn-wrap {
+  display: inline-flex;
+}
+
 /* ---- folder card context menu ---- */
 .context-menu {
   position: fixed;

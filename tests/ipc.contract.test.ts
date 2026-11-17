@@ -25,6 +25,7 @@ interface Setup {
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
   sessionStore: SessionStore
   progressCalls: Array<[number, number]>
+  mediaRoots: { thumbDir: string; previewDir: string }
 }
 
 function setup(): Setup {
@@ -32,6 +33,13 @@ function setup(): Setup {
   dirs.push(dir)
   const { db } = openDatabase(path.join(dir, 'selight.db'))
   handles.push(db)
+
+  const mediaRoots = {
+    thumbDir: path.join(dir, 'thumbnails'),
+    previewDir: path.join(dir, 'previews')
+  }
+  fs.mkdirSync(mediaRoots.thumbDir, { recursive: true })
+  fs.mkdirSync(mediaRoots.previewDir, { recursive: true })
 
   // Recording stand-in for MediaQueue: structural type matches the enqueue/prioritize
   // surface the handlers depend on, and lets tests assert queue wiring without Electron.
@@ -54,10 +62,11 @@ function setup(): Setup {
     db,
     thumbQueue,
     exifReader: fakeReader,
+    mediaRoots,
     sessionStore,
     onExportProgress: (done, total) => progressCalls.push([done, total])
   }
-  return { handlers: createHandlers(deps), db, queueCalls, sessionStore, progressCalls }
+  return { handlers: createHandlers(deps), db, queueCalls, sessionStore, progressCalls, mediaRoots }
 }
 
 afterEach(() => {
@@ -312,6 +321,59 @@ describe('IPC handler contract — full curation chain', () => {
     const names = (await handlers.listFolders(batch.id)).map((f) => f.name)
     expect(names).toContain('new')
     expect(names).not.toContain('old')
+  })
+
+  it('deleteBatch removes every row of the batch and its cache files, leaving other batches intact', async () => {
+    const { handlers, mediaRoots } = setup()
+    const batch = await handlers.createBatch()
+    const keep = await handlers.createBatch('keep')
+    const root = makeFixtureTree()
+    await handlers.importDirectory(batch.id, root)
+    const inbox = await handlers.listView(batch.id, { kind: 'inbox' })
+    const victim = inbox[0].id
+
+    fs.writeFileSync(path.join(mediaRoots.thumbDir, `${victim}.jpg`), 'thumb')
+    fs.writeFileSync(path.join(mediaRoots.thumbDir, `${victim}.jpg.placeholder`), 'marker')
+    fs.writeFileSync(path.join(mediaRoots.previewDir, `${victim}.jpg`), 'preview')
+    // Cache belonging to another batch (different photo id) must survive.
+    const keepCache = path.join(mediaRoots.thumbDir, '999999.jpg')
+    fs.writeFileSync(keepCache, 'keep')
+
+    expect(await handlers.deleteBatch(batch.id)).toBe(4)
+
+    const remaining = await handlers.listBatches()
+    expect(remaining.map((b) => b.id)).toEqual([keep.id])
+    expect(await handlers.listView(batch.id, { kind: 'inbox' })).toEqual([])
+    expect(fs.existsSync(path.join(mediaRoots.thumbDir, `${victim}.jpg`))).toBe(false)
+    expect(fs.existsSync(path.join(mediaRoots.thumbDir, `${victim}.jpg.placeholder`))).toBe(false)
+    expect(fs.existsSync(path.join(mediaRoots.previewDir, `${victim}.jpg`))).toBe(false)
+    expect(fs.existsSync(keepCache)).toBe(true)
+  })
+
+  it('deleteBatch propagates BatchNotFoundError for an unknown id', async () => {
+    const { handlers } = setup()
+    await handlers.createBatch()
+    await expectRejectName(() => handlers.deleteBatch(999_999), 'BatchNotFoundError')
+  })
+
+  it('renameBatch updates the name visible in listBatches', async () => {
+    const { handlers } = setup()
+    const first = await handlers.createBatch('first')
+    await handlers.createBatch('second')
+
+    await handlers.renameBatch(first.id, '婚礼正片')
+
+    const batches = await handlers.listBatches()
+    expect(batches).toHaveLength(2)
+    expect(batches.find((b) => b.id === first.id)?.name).toBe('婚礼正片')
+    // The untouched batch keeps its name.
+    expect(batches.find((b) => b.name === 'second')).toBeDefined()
+  })
+
+  it('renameBatch propagates BatchNotFoundError for an unknown id', async () => {
+    const { handlers } = setup()
+    await handlers.createBatch()
+    await expectRejectName(() => handlers.renameBatch(999_999, 'x'), 'BatchNotFoundError')
   })
 
   it('undo returns false when the batch has no undoable group', async () => {

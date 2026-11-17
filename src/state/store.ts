@@ -42,6 +42,8 @@ type Action =
       counts: Counts
     }
   | { type: 'selected'; ids: number[] }
+  // The open batch was deleted: reset to the empty-workspace shell.
+  | { type: 'closed' }
   | { type: 'loading'; loading: boolean }
   | { type: 'error'; error: string }
 
@@ -84,6 +86,16 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'selected':
       // Mirror of the selection model owned by SelectionProvider/useSelection.
       return { ...state, selection: action.ids }
+    case 'closed':
+      return {
+        ...state,
+        batchId: null,
+        view: { kind: 'inbox' },
+        selection: [],
+        folders: [],
+        photos: [],
+        counts: null
+      }
     case 'loading':
       // Starting a new async chain (boot retry, batch open) clears the previous
       // error so a successful retry cannot leave the shell on the stale ErrorState.
@@ -139,9 +151,34 @@ export async function openBatch(deps: ThunkDeps, batchId: number): Promise<void>
   }
 }
 
-export async function createBatch(deps: ThunkDeps): Promise<void> {
-  const batch = await deps.api.createBatch()
+export async function createBatch(deps: ThunkDeps, name?: string): Promise<void> {
+  const batch = await deps.api.createBatch(name)
   await openBatch(deps, batch.id)
+}
+
+/** Rename the open batch and refresh just the dropdown list. */
+export async function renameBatch(
+  deps: ThunkDeps,
+  batchId: number,
+  name: string
+): Promise<void> {
+  await deps.api.renameBatch(batchId, name)
+  deps.dispatch({ type: 'batches', batches: await deps.api.listBatches() })
+}
+
+/**
+ * Hard-delete a batch, then open the most recent remaining batch or land on the
+ * empty workspace. listBatches is last_opened_at DESC, so index 0 is the fallback.
+ */
+export async function deleteBatch(deps: ThunkDeps, batchId: number): Promise<void> {
+  await deps.api.deleteBatch(batchId)
+  const remaining = await deps.api.listBatches()
+  deps.dispatch({ type: 'batches', batches: remaining })
+  if (remaining[0] !== undefined) {
+    await openBatch(deps, remaining[0].id)
+  } else {
+    deps.dispatch({ type: 'closed' })
+  }
 }
 
 /** Open the native directory picker and import its photos; null when canceled. */
@@ -240,7 +277,9 @@ export interface AppStore {
   refresh(): Promise<void>
   switchView(view: View): Promise<void>
   openBatch(batchId: number): Promise<void>
-  createBatch(): Promise<void>
+  createBatch(name?: string): Promise<void>
+  deleteBatch(batchId: number): Promise<void>
+  renameBatch(batchId: number, name: string): Promise<void>
   importDirectory(): Promise<ImportResult | null>
   recoveryImport(): Promise<ImportResult | null>
   exportBatch(outputDir: string): Promise<ExportResult | null>
@@ -291,7 +330,9 @@ export function AppStoreProvider({
     refresh: () => refresh(deps),
     switchView: (view) => switchView(deps, view),
     openBatch: (batchId) => openBatch(deps, batchId),
-    createBatch: () => createBatch(deps),
+    createBatch: (name) => createBatch(deps, name),
+    deleteBatch: (batchId) => deleteBatch(deps, batchId),
+    renameBatch: (batchId, name) => renameBatch(deps, batchId, name),
     importDirectory: () => importDirectory(deps),
     recoveryImport: () => recoveryImport(deps),
     exportBatch: (outputDir) => exportBatch(deps, outputDir)

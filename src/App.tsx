@@ -4,7 +4,8 @@ import ThumbPane from './components/ThumbPane'
 import PreviewPane from './components/PreviewPane'
 import FolderCards from './components/FolderCards'
 import ExportDialog from './components/ExportDialog'
-import { FolderIcon, PlusIcon } from './components/icons'
+import CreateBatchButton from './components/CreateBatchButton'
+import { FolderIcon } from './components/icons'
 import { useShortcuts } from './hooks/useShortcuts'
 import { AppStoreProvider, useAppStore } from './state/store'
 import { SelectionProvider } from './state/selectionContext'
@@ -17,24 +18,12 @@ interface ExportRun {
 }
 
 function EmptyState() {
-  const { createBatch } = useAppStore()
   return (
     <div className="empty-state">
       <FolderIcon size={44} className="empty-icon" />
       <h2>还没有批次</h2>
       <p>新建一个批次，然后导入照片文件夹开始分类。</p>
-      <button
-        type="button"
-        className="tb-btn"
-        onClick={() =>
-          createBatch().catch((e: unknown) =>
-            window.alert(e instanceof Error ? e.message : String(e))
-          )
-        }
-      >
-        <PlusIcon />
-        新建批次
-      </button>
+      <CreateBatchButton />
     </div>
   )
 }
