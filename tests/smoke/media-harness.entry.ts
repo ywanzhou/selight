@@ -113,6 +113,7 @@ app.whenReady().then(async () => {
       absPath,
       ext: '.webp',
       orientation: 1,
+      width: null,
       missing: 0
     }))
 
@@ -176,6 +177,7 @@ app.whenReady().then(async () => {
         absPath: path.join(root, 'vanished.webp'),
         ext: '.webp',
         orientation: 1,
+        width: null,
         missing: 0
       },
       thumbDir,

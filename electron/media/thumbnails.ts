@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import sharp from 'sharp'
 import type { PhotoRow } from '../domain/photos'
+import { enrichPhoto } from './enrich'
 import { ExiftoolReader } from './rawPreview'
 import { RAW_EXTENSIONS } from './formats'
 import { MediaQueue } from './queue'
@@ -20,14 +21,28 @@ const JPEG_QUALITY = 85
 // Smallest structural surface ensureThumbnail needs; a full PhotoRow is assignable to it.
 export type ThumbnailPhoto = Pick<
   PhotoRow,
-  'id' | 'absPath' | 'ext' | 'orientation' | 'missing'
+  'id' | 'absPath' | 'ext' | 'orientation' | 'width' | 'missing'
 >
+
+// ExiftoolReader satisfies this structurally; fakes can provide either method
+// without implementing the full ExifReader surface.
+export interface ThumbnailReader {
+  ensureRawPreview(
+    photo: { id: number; absPath: string; orientation: number },
+    cacheDir: string
+  ): Promise<string>
+  readImageMeta(absPath: string, ext: string): Promise<{
+    orientation: number
+    width: number | null
+    height: number | null
+  }>
+}
 
 export interface ThumbnailDeps {
   /** Cache dir for RAW extracted previews (previews/<id>.jpg). */
   previewDir: string
   /** Injection point for tests and alternate ExifTool transports. */
-  reader?: Pick<ExiftoolReader, 'ensureRawPreview'>
+  reader?: ThumbnailReader
 }
 
 export interface ThumbnailResult {
@@ -150,20 +165,33 @@ export interface ThumbnailRoots {
   previewDir: string
 }
 
-// Wires the queue to the photos DB: the worker loads the row and builds its thumbnail.
-// The returned MediaQueue is what Task 11 calls enqueue/prioritize on.
+// Wires the queue to the photos DB: the worker loads the row, self-heals
+// unenriched RAW metadata (the enrichment service may not have reached it
+// yet, and caching a wrong-orientation RAW thumbnail is permanent), builds
+// the thumbnail and reports readiness for the media-ready event.
 export function createThumbnailQueue(
   db: Database,
   roots: ThumbnailRoots,
-  reader?: Pick<ExiftoolReader, 'ensureRawPreview'>
+  reader?: ThumbnailReader,
+  onReady?: (id: number, ok: boolean) => void
 ): MediaQueue {
   return new MediaQueue(async (id) => {
     const row = db
       .prepare(
-        'SELECT id, abs_path AS absPath, ext, orientation, missing FROM photos WHERE id = ?'
+        'SELECT id, abs_path AS absPath, ext, orientation, width, missing FROM photos WHERE id = ?'
       )
       .get(id) as ThumbnailPhoto | undefined
     if (row === undefined) return
-    await ensureThumbnail(row, roots.thumbDir, { previewDir: roots.previewDir, reader })
+
+    if (RAW_EXTENSIONS.has(row.ext.toLowerCase()) && row.width === null && reader) {
+      // enrichPhoto is a no-op once another path wins the race and fills width.
+      await enrichPhoto(db, id, reader)
+    }
+
+    const result = await ensureThumbnail(row, roots.thumbDir, {
+      previewDir: roots.previewDir,
+      reader
+    })
+    onReady?.(id, result.placeholder === false)
   })
 }

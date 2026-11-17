@@ -68,8 +68,9 @@ app.whenReady().then(() => {
   fs.mkdirSync(previewDir, { recursive: true })
   const roots = { thumbDir, previewDir }
 
-  const rendererRoot = path.join(__dirname, '../renderer')
-  registerMediaProtocol(db, roots, rendererRoot)
+  // A 404 on the thumb route enqueues on-demand generation; the queue dedupes
+  // rapid repeated requests for the same id.
+  registerMediaProtocol(db, roots, (id) => thumbQueue?.enqueue([id]))
 
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(db, roots, exifReader)

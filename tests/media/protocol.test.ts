@@ -4,7 +4,12 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import { openDatabase } from '../../electron/db/schema'
-import { resolveMediaPath, type MediaRoots } from '../../electron/media/resolve'
+import { MediaQueue } from '../../electron/media/queue'
+import {
+  resolveMediaPath,
+  type MediaRoots,
+  type ResolveResult
+} from '../../electron/media/resolve'
 
 const dirs: string[] = []
 const handles: Database[] = []
@@ -16,9 +21,9 @@ function tempLayout(): { db: Database; roots: MediaRoots; outside: string } {
   handles.push(db)
   const thumbDir = path.join(dir, 'thumbnails')
   const previewDir = path.join(dir, 'previews')
-  const outside = path.join(dir, 'outside')
   fs.mkdirSync(thumbDir)
   fs.mkdirSync(previewDir)
+  const outside = path.join(dir, 'outside')
   fs.mkdirSync(outside)
   return { db, roots: { thumbDir, previewDir }, outside }
 }
@@ -75,31 +80,38 @@ function insertPhoto(
   return Number(info.lastInsertRowid)
 }
 
+function forbidden(result: ResolveResult): boolean {
+  return result.ok === false && result.reason === 'forbidden'
+}
+
 describe('resolveMediaPath — thumb route', () => {
   it('resolves an existing <id>.jpg inside thumbDir and never escapes it', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'a.jpg')
     touch(path.join(roots.thumbDir, `${id}.jpg`))
-    // Decoy with a non-numeric name must be unaddressable.
     touch(path.join(roots.thumbDir, 'evil.jpg'))
-    // Decoy reachable only by traversal.
     touch(path.join(outside, 'escape.jpg'))
 
     const resolved = resolveMediaPath(db, roots, 'thumb', id)
-    expect(resolved).toBe(path.resolve(roots.thumbDir, `${id}.jpg`))
-    expect(resolved!.startsWith(path.resolve(roots.thumbDir) + path.sep)).toBe(true)
-
-    // Numeric strings are accepted.
-    expect(resolveMediaPath(db, roots, 'thumb', String(id))).toBe(resolved)
+    expect(resolved).toEqual({
+      ok: true,
+      file: path.resolve(roots.thumbDir, `${id}.jpg`)
+    })
+    const again = resolveMediaPath(db, roots, 'thumb', String(id))
+    expect(again).toEqual(resolved)
   })
 
-  it('returns null when the thumbnail file has not been generated yet', () => {
+  it('reports not-generated with the id when the thumbnail file is missing', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'a.jpg')
-    expect(resolveMediaPath(db, roots, 'thumb', id)).toBeNull()
+    expect(resolveMediaPath(db, roots, 'thumb', id)).toEqual({
+      ok: false,
+      reason: 'not-generated',
+      id
+    })
   })
 
-  it('rejects unknown, non-numeric and traversal ids', () => {
+  it('rejects unknown, non-numeric and traversal ids as forbidden', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'a.jpg')
     touch(path.join(roots.thumbDir, `${id}.jpg`))
@@ -115,47 +127,78 @@ describe('resolveMediaPath — thumb route', () => {
       '../outside/escape',
       '../../escape',
       '1/../evil',
-      // The placeholder sidecar must never be servable through the thumb route.
       '1.jpg.placeholder',
-      // Percent-encoded traversal is still a non-numeric id.
       '%2e%2e%2f1'
     ]) {
-      expect(resolveMediaPath(db, roots, 'thumb', bad as never), `id=${JSON.stringify(bad)}`).toBeNull()
+      const result = resolveMediaPath(db, roots, 'thumb', bad as never)
+      expect(forbidden(result), `id=${JSON.stringify(bad)}`).toBe(true)
     }
   })
 
-  it('returns null for missing photos even if a thumb file exists', () => {
+  it('treats missing photos as forbidden even if a thumb file exists', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'gone.jpg', { missing: 1 })
     touch(path.join(roots.thumbDir, `${id}.jpg`))
-    expect(resolveMediaPath(db, roots, 'thumb', id)).toBeNull()
+    expect(forbidden(resolveMediaPath(db, roots, 'thumb', id))).toBe(true)
   })
 
   it('never serves a source file outside thumbDir through the thumb route', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'a.jpg')
     touch(path.join(outside, 'a.jpg'))
-    expect(resolveMediaPath(db, roots, 'thumb', id)).toBeNull()
+    const result = resolveMediaPath(db, roots, 'thumb', id)
+    expect(result.ok === false && result.reason).toBe('not-generated')
+  })
+
+  it('dedupes repeated not-generated ids through a real MediaQueue (worker runs once)', async () => {
+    const { db, roots, outside } = tempLayout()
+    const id = insertPhoto(db, outside, 'a.jpg')
+    const runs: number[] = []
+    const queue = new MediaQueue(async (jobId) => {
+      runs.push(jobId)
+    })
+    const onMissing = (missingId: number): void => {
+      queue.enqueue([missingId])
+    }
+
+    // Three rapid 404s for the same ungenerated thumbnail, like grid remounts.
+    for (let i = 0; i < 3; i += 1) {
+      const result = resolveMediaPath(db, roots, 'thumb', id)
+      if (result.ok === false && result.reason === 'not-generated') {
+        onMissing(result.id)
+      }
+    }
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+
+    expect(runs).toEqual([id])
+    queue.stop()
   })
 })
 
-describe('resolveMediaPath — photo route', () => {
+describe('resolveMediaPath — photo route (phase 2: original bytes still served)', () => {
   it('serves a registered direct-format source file even when it lives outside the roots', () => {
     const { db, roots, outside } = tempLayout()
     const absPath = path.join(outside, 'photo.jpg')
     touch(absPath)
     const id = insertPhoto(db, outside, 'photo.jpg', { absPath })
 
-    expect(resolveMediaPath(db, roots, 'photo', id)).toBe(path.resolve(absPath))
+    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
+      ok: true,
+      file: path.resolve(absPath)
+    })
   })
 
-  it('returns null when a direct-format source file has vanished from disk', () => {
+  it('reports not-generated when a direct-format source file has vanished from disk', () => {
     const { db, roots, outside } = tempLayout()
     const absPath = path.join(outside, 'vanish.jpg')
     touch(absPath)
     const id = insertPhoto(db, outside, 'vanish.jpg', { absPath })
     fs.rmSync(absPath)
-    expect(resolveMediaPath(db, roots, 'photo', id)).toBeNull()
+    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
+      ok: false,
+      reason: 'not-generated',
+      id
+    })
   })
 
   it('serves RAW photos only from the preview cache, never the source path', () => {
@@ -164,16 +207,18 @@ describe('resolveMediaPath — photo route', () => {
     touch(absPath)
     const id = insertPhoto(db, outside, 'shot.arw', { ext: '.arw', absPath })
 
-    // No cached preview yet.
-    expect(resolveMediaPath(db, roots, 'photo', id)).toBeNull()
+    expect(resolveMediaPath(db, roots, 'photo', id)).toEqual({
+      ok: false,
+      reason: 'not-generated',
+      id
+    })
 
     touch(path.join(roots.previewDir, `${id}.jpg`))
     const resolved = resolveMediaPath(db, roots, 'photo', id)
-    expect(resolved).toBe(path.resolve(roots.previewDir, `${id}.jpg`))
-    expect(resolved).not.toBe(path.resolve(absPath))
+    expect(resolved).toEqual({ ok: true, file: path.resolve(roots.previewDir, `${id}.jpg`) })
   })
 
-  it('rejects unknown, non-numeric and traversal ids', () => {
+  it('rejects unknown, non-numeric and traversal ids as forbidden', () => {
     const { db, roots } = tempLayout()
     for (const bad of [
       999,
@@ -188,23 +233,24 @@ describe('resolveMediaPath — photo route', () => {
       '1.jpg.placeholder',
       '%2e%2e%2f1'
     ]) {
-      expect(resolveMediaPath(db, roots, 'photo', bad as never), `id=${JSON.stringify(bad)}`).toBeNull()
+      const result = resolveMediaPath(db, roots, 'photo', bad as never)
+      expect(forbidden(result), `id=${JSON.stringify(bad)}`).toBe(true)
     }
   })
 
-  it('returns null for missing photos', () => {
+  it('returns forbidden for missing photos', () => {
     const { db, roots, outside } = tempLayout()
     const absPath = path.join(outside, 'gone.jpg')
     touch(absPath)
     const id = insertPhoto(db, outside, 'gone.jpg', { absPath, missing: 1 })
-    expect(resolveMediaPath(db, roots, 'photo', id)).toBeNull()
+    expect(forbidden(resolveMediaPath(db, roots, 'photo', id))).toBe(true)
   })
 
-  it('rejects an unknown kind', () => {
+  it('rejects an unknown kind as forbidden', () => {
     const { db, roots, outside } = tempLayout()
     const id = insertPhoto(db, outside, 'a.jpg')
     touch(path.join(roots.thumbDir, `${id}.jpg`))
     // @ts-expect-error exercising runtime defence against a bad host segment
-    expect(resolveMediaPath(db, roots, 'evil', id)).toBeNull()
+    expect(forbidden(resolveMediaPath(db, roots, 'evil', id))).toBe(true)
   })
 })

@@ -8,14 +8,19 @@ import sharp from 'sharp'
 // bare-node Vitest exactly like better-sqlite3. Every source image is generated
 // into a tmpdir fixture; the corpus is never opened for writing.
 import {
+  createThumbnailQueue,
   ensureThumbnail,
   PLACEHOLDER_JPEG_BYTES,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
 import { RawPreviewError } from '../../electron/media/rawPreview'
+import { openDatabase } from '../../electron/db/schema'
+import { createBatch } from '../../electron/domain/batches'
+import type { Database } from 'better-sqlite3'
 import { tinyJpeg } from './fixtures'
 
 const dirs: string[] = []
+const dbHandles: Database[] = []
 
 function makeCacheDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-thumb-'))
@@ -53,16 +58,18 @@ async function writeSource(
   const dir = makeCacheDir()
   const source = path.join(dir, name)
   await fs.promises.writeFile(source, image)
+  const photo: ThumbnailPhoto = {
+    id: 42,
+    absPath: source,
+    ext: path.extname(name).toLowerCase(),
+    orientation: 1,
+    width: null,
+    missing: 0,
+    ...overrides
+  }
   return {
     source,
-    photo: {
-      id: 42,
-      absPath: source,
-      ext: path.extname(name).toLowerCase(),
-      orientation: 1,
-      missing: 0,
-      ...overrides
-    }
+    photo
   }
 }
 
@@ -72,6 +79,7 @@ function photo(overrides: Partial<ThumbnailPhoto> = {}): ThumbnailPhoto {
     absPath: path.join(os.tmpdir(), 'selight-nonexistent-source.jpg'),
     ext: '.jpg',
     orientation: 1,
+    width: null,
     missing: 0,
     ...overrides
   }
@@ -82,6 +90,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  while (dbHandles.length) {
+    const db = dbHandles.pop()!
+    if (db.open) db.close()
+  }
   while (dirs.length) {
     fs.rmSync(dirs.pop()!, { recursive: true, force: true })
   }
@@ -161,7 +173,10 @@ describe('ensureThumbnail sharp pipeline', () => {
 
     const result = await ensureThumbnail(p, cacheDir, {
       previewDir,
-      reader: { ensureRawPreview: async () => extracted }
+      reader: {
+        ensureRawPreview: async () => extracted,
+        readImageMeta: async () => ({ orientation: 1, width: 640, height: 480 })
+      }
     })
     expect(result.placeholder).toBe(false)
     expect((await sharp(result.path).metadata()).width).toBe(320)
@@ -237,13 +252,125 @@ describe('ensureThumbnail sharp pipeline', () => {
       reader: {
         ensureRawPreview: async () => {
           throw new RawPreviewError('no embedded preview')
-        }
+        },
+        readImageMeta: async () => ({ orientation: 1, width: 640, height: 480 })
       }
     })
     expect(result.placeholder).toBe(true)
     expect(fs.existsSync(`${path.join(cacheDir, '42.jpg')}.placeholder`)).toBe(true)
   })
 
+  describe('createThumbnailQueue self-heal and readiness', () => {
+    let db: Database
+    let dbDir: string
+    let thumbDir: string
+    let previewDir: string
+    let batchId: number
+
+    beforeEach(() => {
+      dbDir = makeCacheDir()
+      db = openDatabase(path.join(dbDir, 'selight.db')).db
+      dbHandles.push(db)
+      thumbDir = path.join(dbDir, 'thumbnails')
+      previewDir = path.join(dbDir, 'previews')
+      fs.mkdirSync(thumbDir)
+      fs.mkdirSync(previewDir)
+      batchId = createBatch(db).id
+    })
+
+    function insertRawRow(): number {
+      const sourceId = Number(
+        db
+          .prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)')
+          .run(batchId, path.join(dbDir, 'shot.arw')).lastInsertRowid
+      )
+      return Number(
+        db
+          .prepare(
+            `INSERT INTO photos
+               (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, status, missing)
+             VALUES (?, ?, ?, 'shot.arw', '.arw', 1, 1, 'inbox', 0)`
+          )
+          .run(batchId, sourceId, path.join(dbDir, 'shot.arw')).lastInsertRowid
+      )
+    }
+
+    function drain(queue: { onIdle(cb: () => void): void; stop(): void }): Promise<void> {
+      return new Promise((resolve) => {
+        queue.onIdle(() => resolve())
+      })
+    }
+
+    it('enriches an unenriched RAW before extracting its preview, then reports ready ok', async () => {
+      const id = insertRawRow()
+      const readImageMeta = vi.fn(async () => ({
+        orientation: 6,
+        width: 6000,
+        height: 4000
+      }))
+      const ensureRawPreview = vi.fn(async () => {
+        const file = path.join(previewDir, `${id}.jpg`)
+        await fs.promises.writeFile(file, await makeImage({ ext: '.jpg' }))
+        return file
+      })
+      const onReady = vi.fn()
+      const queue = createThumbnailQueue(
+        db,
+        { thumbDir, previewDir },
+        { readImageMeta, ensureRawPreview },
+        onReady
+      )
+
+      queue.enqueue([id])
+      await drain(queue)
+      queue.stop()
+
+      // Self-heal must precede preview extraction, or a wrong-orientation
+      // thumbnail would be cached permanently.
+      expect(readImageMeta.mock.invocationCallOrder[0]).toBeLessThan(
+        ensureRawPreview.mock.invocationCallOrder[0]
+      )
+      const row = db
+        .prepare('SELECT orientation, width, height FROM photos WHERE id = ?')
+        .get(id) as { orientation: number; width: number; height: number }
+      expect(row).toEqual({ orientation: 6, width: 4000, height: 6000 })
+      expect(fs.existsSync(path.join(thumbDir, `${id}.jpg`))).toBe(true)
+      expect(fs.existsSync(`${path.join(thumbDir, `${id}.jpg`)}.placeholder`)).toBe(false)
+      expect(onReady).toHaveBeenCalledWith(id, true)
+    })
+
+    it('reports ready ok:false and keeps the sidecar when generation fails', async () => {
+      const dir = makeCacheDir()
+      const source = path.join(dir, 'broken.jpg')
+      fs.writeFileSync(source, Buffer.alloc(0))
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const sourceId = Number(
+        db
+          .prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)')
+          .run(batchId, dir).lastInsertRowid
+      )
+      const id = Number(
+        db
+          .prepare(
+            `INSERT INTO photos
+               (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, status, missing)
+             VALUES (?, ?, ?, 'broken.jpg', '.jpg', 0, 1, 'inbox', 0)`
+          )
+          .run(batchId, sourceId, source).lastInsertRowid
+      )
+      const onReady = vi.fn()
+      const queue = createThumbnailQueue(db, { thumbDir, previewDir }, undefined, onReady)
+      queue.enqueue([id])
+      await drain(queue)
+      queue.stop()
+
+      expect(onReady).toHaveBeenCalledWith(id, false)
+      expect(fs.existsSync(`${path.join(thumbDir, `${id}.jpg`)}.placeholder`)).toBe(true)
+    })
+  })
+})
+
+describe('ensureThumbnail sharp pipeline — remaining cases', () => {
   it('resizes an extracted RAW preview through sharp and clears a stale sidecar', async () => {
     const cacheDir = makeCacheDir()
     const previewDir = makeCacheDir()
@@ -255,7 +382,10 @@ describe('ensureThumbnail sharp pipeline', () => {
 
     const result = await ensureThumbnail(p, cacheDir, {
       previewDir,
-      reader: { ensureRawPreview: async () => extracted }
+      reader: {
+        ensureRawPreview: async () => extracted,
+        readImageMeta: async () => ({ orientation: 1, width: 640, height: 480 })
+      }
     })
     expect(result).toEqual({ path: out, placeholder: false })
     expect(fs.existsSync(`${out}.placeholder`)).toBe(false)
