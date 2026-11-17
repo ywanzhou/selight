@@ -139,8 +139,8 @@ export async function openBatch(deps: ThunkDeps, batchId: number): Promise<void>
   }
 }
 
-export async function createBatch(deps: ThunkDeps): Promise<void> {
-  const batch = await deps.api.createBatch()
+export async function createBatch(deps: ThunkDeps, name?: string): Promise<void> {
+  const batch = await deps.api.createBatch(name)
   await openBatch(deps, batch.id)
 }
 
@@ -240,7 +240,7 @@ export interface AppStore {
   refresh(): Promise<void>
   switchView(view: View): Promise<void>
   openBatch(batchId: number): Promise<void>
-  createBatch(): Promise<void>
+  createBatch(name?: string): Promise<void>
   importDirectory(): Promise<ImportResult | null>
   recoveryImport(): Promise<ImportResult | null>
   exportBatch(outputDir: string): Promise<ExportResult | null>
@@ -291,7 +291,7 @@ export function AppStoreProvider({
     refresh: () => refresh(deps),
     switchView: (view) => switchView(deps, view),
     openBatch: (batchId) => openBatch(deps, batchId),
-    createBatch: () => createBatch(deps),
+    createBatch: (name) => createBatch(deps, name),
     importDirectory: () => importDirectory(deps),
     recoveryImport: () => recoveryImport(deps),
     exportBatch: (outputDir) => exportBatch(deps, outputDir)

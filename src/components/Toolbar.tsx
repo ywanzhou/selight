@@ -1,12 +1,13 @@
 import { useAppStore } from '../state/store'
-import { ExportIcon, ImportIcon, PlusIcon } from './icons'
+import { ExportIcon, ImportIcon } from './icons'
+import CreateBatchButton from './CreateBatchButton'
 
 function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
-  const { state, openBatch, createBatch, importDirectory } = useAppStore()
+  const { state, openBatch, importDirectory } = useAppStore()
   const { batches, batchId, counts, loading } = state
 
   const total = counts?.total ?? 0
@@ -40,17 +41,7 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
         ))}
       </select>
 
-      <button
-        type="button"
-        className="tb-btn"
-        disabled={loading}
-        onClick={() => {
-          createBatch().catch(showError)
-        }}
-      >
-        <PlusIcon />
-        新建批次
-      </button>
+      <CreateBatchButton />
 
       <button
         type="button"

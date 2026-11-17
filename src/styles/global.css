@@ -496,6 +496,12 @@ button:disabled {
   text-align: center;
 }
 
+/* Inline batch naming: fixed-width slot replacing the 新建批次 button. */
+.batch-name-input {
+  width: 170px;
+  flex-shrink: 0;
+}
+
 /* ---- folder card context menu ---- */
 .context-menu {
   position: fixed;

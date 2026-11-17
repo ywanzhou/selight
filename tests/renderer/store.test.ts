@@ -39,6 +39,7 @@ const HANDLER_NAMES = [
   'assign',
   'trash',
   'restore',
+  'unassign',
   'undo',
   'exportBatch',
   'pickDirectory',
@@ -533,7 +534,7 @@ describe('interactive thunks', () => {
     expect(listView).not.toHaveBeenCalled()
   })
 
-  it('createBatch opens the freshly created batch', async () => {
+  it('createBatch opens the freshly created batch and lets the backend default the name', async () => {
     const create = vi.fn(async () => batch)
     const open = vi.fn(async () => opened)
     const api = makeApi({
@@ -546,8 +547,26 @@ describe('interactive thunks', () => {
     await createBatch(h.deps)
 
     expect(create).toHaveBeenCalledTimes(1)
+    // No name argument: the domain layer supplies the date-based default.
+    expect(create).toHaveBeenCalledWith(undefined)
     expect(open).toHaveBeenCalledWith(1)
     expect(h.state.batchId).toBe(1)
+  })
+
+  it('createBatch forwards a custom name to the bridge', async () => {
+    const create = vi.fn(async () => batch)
+    const open = vi.fn(async () => opened)
+    const api = makeApi({
+      createBatch: create,
+      openBatch: open,
+      listBatches: vi.fn(async () => [batch])
+    })
+    const h = harness(api)
+
+    await createBatch(h.deps, '婚礼')
+
+    expect(create).toHaveBeenCalledWith('婚礼')
+    expect(open).toHaveBeenCalledWith(1)
   })
 })
 
