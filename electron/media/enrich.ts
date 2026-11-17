@@ -102,16 +102,18 @@ export class EnrichmentService {
   private readonly inFlight = new Set<number>()
   private accepted = 0
   private finished = 0
+  private readonly onProgress?: EnrichmentOptions['onProgress']
 
   constructor(
     private readonly db: Database,
     reader: Pick<ExifReader, 'readImageMeta'>,
     opts: EnrichmentOptions = {}
   ) {
+    this.onProgress = opts.onProgress
     const settle = (id: number): void => {
       this.inFlight.delete(id)
       this.finished += 1
-      opts.onProgress?.(this.finished, this.accepted)
+      this.onProgress?.(this.finished, this.accepted)
     }
     this.direct = new MediaQueue(
       async (id) => {
@@ -170,5 +172,18 @@ export class EnrichmentService {
   stop(): void {
     this.direct.stop()
     this.raw.stop()
+  }
+
+  // Cancel waiting work while keeping the service reusable: drop queued ids
+  // (in-flight tasks finish naturally), reset progress bookkeeping and clear
+  // the toolbar indicator. Distinct from stop(), which permanently closes both
+  // queues on app quit.
+  cancel(): void {
+    this.direct.cancel()
+    this.raw.cancel()
+    this.inFlight.clear()
+    this.accepted = 0
+    this.finished = 0
+    this.onProgress?.(0, 0)
   }
 }

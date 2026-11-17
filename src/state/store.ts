@@ -288,6 +288,7 @@ export interface AppStore {
   deleteBatch(batchId: number): Promise<void>
   renameBatch(batchId: number, name: string): Promise<void>
   importDirectory(): Promise<ImportResult | null>
+  cancelImport(): Promise<void>
   recoveryImport(): Promise<ImportResult | null>
   exportBatch(outputDir: string): Promise<ExportResult | null>
 }
@@ -353,6 +354,7 @@ export function AppStoreProvider({
     deleteBatch: (batchId) => deleteBatch(deps, batchId),
     renameBatch: (batchId, name) => renameBatch(deps, batchId, name),
     importDirectory: () => importDirectory(deps),
+    cancelImport: () => deps.api.cancelImport(),
     recoveryImport: () => recoveryImport(deps),
     exportBatch: (outputDir) => exportBatch(deps, outputDir)
   }

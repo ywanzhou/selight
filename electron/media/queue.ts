@@ -60,6 +60,13 @@ export class MediaQueue {
     this.stopped = true
   }
 
+  // Cancel waiting work without closing the queue: queued ids are dropped while
+  // in-flight tasks run to completion, and later enqueue calls still pump. This
+  // is the import-cancel path, distinct from the permanent stop() on app quit.
+  cancel(): void {
+    this.queued.length = 0
+  }
+
   private isKnown(id: number): boolean {
     return this.active.has(id) || this.queued.includes(id)
   }

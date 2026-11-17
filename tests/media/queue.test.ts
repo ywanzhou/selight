@@ -245,6 +245,48 @@ describe('MediaQueue.onIdle', () => {
   })
 })
 
+describe('MediaQueue.cancel', () => {
+  it('drops queued ids while letting in-flight work finish', async () => {
+    const gates = new Map<number, ReturnType<typeof gate>>()
+    const calls: number[] = []
+    const queue = new MediaQueue(async (id) => {
+      calls.push(id)
+      let g = gates.get(id)
+      if (!g) {
+        g = gate()
+        gates.set(id, g)
+      }
+      await g.promise
+    }, 1)
+
+    queue.enqueue([1, 2, 3])
+    await flushMicrotasks()
+    expect(calls).toEqual([1])
+
+    queue.cancel()
+    expect([...queue.pending]).toEqual([])
+    const drained = new Promise<void>((resolve) => queue.onIdle(resolve))
+    gates.get(1)!.release()
+    await drained
+    expect(calls).toEqual([1])
+    queue.stop()
+  })
+
+  it('keeps the queue reusable after cancel (unlike stop)', async () => {
+    const calls: number[] = []
+    const queue = new MediaQueue(async (id) => {
+      calls.push(id)
+    })
+    queue.enqueue([1, 2])
+    queue.cancel()
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+
+    queue.enqueue([4])
+    await new Promise<void>((resolve) => queue.onIdle(resolve))
+    expect(calls).toContain(4)
+  })
+})
+
 describe('MediaQueue.stop', () => {
   it('never runs ids enqueued or prioritized after stop, leaving them pending', async () => {
     const calls: number[] = []

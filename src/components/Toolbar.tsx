@@ -9,7 +9,8 @@ function showError(e: unknown): void {
 }
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
-  const { state, openBatch, importDirectory, deleteBatch, renameBatch } = useAppStore()
+  const { state, openBatch, importDirectory, cancelImport, deleteBatch, renameBatch } =
+    useAppStore()
   const { batches, batchId, counts, loading, enrichProgress } = state
   const [renaming, setRenaming] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -44,6 +45,11 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
     } finally {
       setImporting(false)
     }
+  }
+
+  async function handleCancelImport() {
+    await cancelImport()
+    setImporting(false)
   }
 
   return (
@@ -105,17 +111,29 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
       <CreateBatchButton />
 
-      <button
-        type="button"
-        className="tb-btn"
-        disabled={batchId === null || loading || importing}
-        onClick={() => {
-          handleImport().catch(showError)
-        }}
-      >
-        <ImportIcon />
-        {importing ? '导入中…' : '导入文件夹'}
-      </button>
+      {importing ? (
+        <button
+          type="button"
+          className="tb-btn"
+          onClick={() => {
+            handleCancelImport().catch(showError)
+          }}
+        >
+          取消导入
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="tb-btn"
+          disabled={batchId === null || loading}
+          onClick={() => {
+            handleImport().catch(showError)
+          }}
+        >
+          <ImportIcon />
+          导入文件夹
+        </button>
+      )}
 
       {/* Wrapper span carries the tooltip: a disabled button itself never fires
           mouse events, so its own title would never appear. */}

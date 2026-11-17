@@ -21,6 +21,7 @@ interface Setup {
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
   enrichmentCalls: number[][]
+  enrichment: { submit: (ids: number[]) => void; cancel: ReturnType<typeof vi.fn>; stop: () => void }
   retryCalls: { thumb: number[][]; photo: number[][] }
   sessionStore: SessionStore
   progressCalls: Array<[number, number]>
@@ -53,6 +54,7 @@ function setup(): Setup {
   const enrichmentCalls: number[][] = []
   const enrichment = {
     submit: (ids: number[]) => enrichmentCalls.push([...ids]),
+    cancel: vi.fn(),
     stop: () => undefined
   }
 
@@ -86,6 +88,7 @@ function setup(): Setup {
     db,
     queueCalls,
     enrichmentCalls,
+    enrichment,
     retryCalls,
     sessionStore,
     progressCalls,
@@ -273,6 +276,17 @@ describe('IPC handler contract — full curation chain', () => {
     enrichmentCalls.length = 0
     await handlers.openBatch(batch.id)
     expect(enrichmentCalls).toHaveLength(0)
+  })
+
+  it('cancelImport cancels enrichment and remains safe with no active scan', async () => {
+    const { handlers, enrichment } = setup()
+    await handlers.cancelImport()
+    expect(enrichment.cancel).toHaveBeenCalledTimes(1)
+
+    // Re-open still works after a cancel with no scan in flight.
+    const batch = await handlers.createBatch()
+    const state = await handlers.openBatch(batch.id)
+    expect(state.batch.id).toBe(batch.id)
   })
 
   it('retryMedia dispatches to the matching thumb or preview retry seam', async () => {

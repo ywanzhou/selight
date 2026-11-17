@@ -77,6 +77,8 @@ export interface SelightHandlers {
   deleteFolder(folderId: number): Promise<number>
 
   importDirectory(batchId: number, rootPath: string): Promise<ImportResult>
+  /** Abort an in-flight discovery scan and drop queued enrichment work. */
+  cancelImport(): Promise<void>
   listView(batchId: number, view: View): Promise<PhotoRow[]>
   counts(batchId: number): Promise<Counts>
   mediaUrl(photoId: number, kind: MediaKind): Promise<string>
@@ -135,6 +137,7 @@ export const IPC_CHANNELS = {
   folderRename: 'selight:folder:rename',
   folderDelete: 'selight:folder:delete',
   photoImport: 'selight:photo:import',
+  importCancel: 'selight:import:cancel',
   photoListView: 'selight:photo:list-view',
   photoCounts: 'selight:photo:counts',
   photoMediaUrl: 'selight:photo:media-url',

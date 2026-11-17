@@ -162,6 +162,7 @@ app.whenReady().then(() => {
     (_event, batchId: number, rootPath: string) =>
       handlers.importDirectory(batchId, rootPath)
   )
+  ipcMain.handle(IPC_CHANNELS.importCancel, () => handlers.cancelImport())
   ipcMain.handle(
     IPC_CHANNELS.photoListView,
     (_event, batchId: number, view: View) => handlers.listView(batchId, view)

@@ -20,6 +20,7 @@ const api: SelightApi = {
 
   importDirectory: (batchId, rootPath) =>
     ipcRenderer.invoke(IPC_CHANNELS.photoImport, batchId, rootPath),
+  cancelImport: () => ipcRenderer.invoke(IPC_CHANNELS.importCancel),
   listView: (batchId, view) =>
     ipcRenderer.invoke(IPC_CHANNELS.photoListView, batchId, view),
   counts: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.photoCounts, batchId),

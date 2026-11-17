@@ -36,6 +36,7 @@ const HANDLER_NAMES = [
   'renameFolder',
   'deleteFolder',
   'importDirectory',
+  'cancelImport',
   'listView',
   'counts',
   'mediaUrl',

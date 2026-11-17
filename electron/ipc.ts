@@ -39,7 +39,7 @@ export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   /** Background metadata enrichment (orientation/dimensions); main.ts wires the real service. */
-  enrichment: Pick<EnrichmentService, 'submit'>
+  enrichment: Pick<EnrichmentService, 'submit' | 'cancel'>
   /** Manual placeholder retry: main.ts clears the cache file and re-enqueues. */
   retry: {
     retryThumb(id: number): void
@@ -97,6 +97,9 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
   const { db, thumbQueue, enrichment, retry, mediaRoots, sessionStore, onExportProgress } =
     deps
+  // One discovery scan at a time (the renderer disables the import button
+  // in-flight); cancelImport aborts this and drops queued enrichment work.
+  let scanAbort: AbortController | null = null
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -170,11 +173,29 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
       const sourceId = upsertSource(db, batchId, rootPath)
       // fs-only discovery: no exiftool on the critical path; rows land with the
       // orientation DEFAULT 1 and NULL dimensions for the enrichment service.
-      const { files, failures } = await scanDirectory(rootPath)
+      scanAbort = new AbortController()
+      let files
+      let failures: string[]
+      try {
+        ;({ files, failures } = await scanDirectory(rootPath, scanAbort.signal))
+      } catch (err) {
+        if ((err as { name?: string }).name === 'AbortError') {
+          // Cancelled before any rows were written: return an empty result.
+          return { added: 0, updated: 0, missing: 0, failures: [] }
+        }
+        throw err
+      } finally {
+        scanAbort = null
+      }
       const result = importScanned(db, batchId, sourceId, files)
       enrichment.submit(photoIdsForPaths(db, batchId, files.map((file) => file.absPath)))
       const out: ImportResult = { ...result, failures }
       return out
+    },
+
+    async cancelImport() {
+      scanAbort?.abort()
+      enrichment.cancel()
     },
 
     async listView(batchId, view) {
