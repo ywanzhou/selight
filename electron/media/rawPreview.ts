@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import sharp from 'sharp'
 import { exiftool } from 'exiftool-vendored'
 import type { ExifReader } from '../scanner'
-import { rotateJpegBuffer } from './orientation'
+import { orientationToRotate } from './orientation'
 
 export class RawPreviewError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -57,7 +58,12 @@ export class ExiftoolReader implements ExifReader {
     }
 
     const extracted = await this.extractPreview(photo.absPath)
-    const rotated = await rotateJpegBuffer(extracted, photo.orientation)
+    // Embedded previews carry no EXIF orientation tag: the source ARW's
+    // orientation drives an explicit sharp rotation. angle 0 is a no-op.
+    const rotated = await sharp(extracted)
+      .rotate(orientationToRotate(photo.orientation))
+      .jpeg()
+      .toBuffer()
     await fs.mkdir(cacheDir, { recursive: true })
     // Sibling .tmp + rename: a crash mid-write cannot leave a truncated preview
     // that the access()-based cache check above would serve forever.

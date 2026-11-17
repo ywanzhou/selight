@@ -78,7 +78,6 @@
   "dependencies": {
     "better-sqlite3": "^13.1.1",
     "exiftool-vendored": "^39.3.0",
-    "jpeg-autorotate": "^9.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-window": "^2.5.3",

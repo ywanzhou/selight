@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
-import jpeg from 'jpeg-js'
+import sharp from 'sharp'
 import { openDatabase } from '../../electron/db/schema'
 import { registerMediaProtocol } from '../../electron/media/protocol'
 import {
@@ -87,10 +87,13 @@ app.whenReady().then(async () => {
     // ----------------------------------------------------------- JPEG path control
     // The control T18 was missing: prove nativeImage's path API itself works, so the
     // webp fault is format-specific rather than a broken path-based API.
-    const frame = Buffer.alloc(4 * 8 * 4)
-    for (let i = 0; i < frame.length; i += 4) frame.set([200, 100, 50, 255], i)
     const controlJpg = path.join(root, 'control.jpg')
-    fs.writeFileSync(controlJpg, jpeg.encode({ data: frame, width: 8, height: 4 }, 90).data)
+    const controlBytes = await sharp({
+      create: { width: 8, height: 4, channels: 3, background: { r: 200, g: 100, b: 50 } }
+    })
+      .jpeg()
+      .toBuffer()
+    fs.writeFileSync(controlJpg, controlBytes)
     const controlImage = await nativeImage.createThumbnailFromPath(controlJpg, {
       width: 320,
       height: 320

@@ -13,8 +13,8 @@
  *   The whole describe below is skipped with a reason naming these contents, so
  *   `npm test` stays green on every machine without the private corpus.
  * NODE BOUNDARY (this file): real ExifTool scan/import, real preview extraction,
- *   real jpeg-autorotate rotation, JPEG frame dimensions decoded with jpeg-js.
- * ELECTRON-ONLY BOUNDARY (nativeImage decode + selight://thumb|photo routes):
+ *   sharp rotation, JPEG frame dimensions read with sharp metadata.
+ * ELECTRON-ONLY BOUNDARY (selight://thumb|photo routes):
  *   tests/smoke/raw-samples-harness.entry.ts, built by electron-vite and launched
  *   manually via tests/smoke/electron-raw-samples-harness.cjs.
  */
@@ -23,13 +23,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
-import jpeg from 'jpeg-js'
+import sharp from 'sharp'
 import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { importScanned, scanDirectory } from '../../electron/scanner'
 import { ExiftoolReader } from '../../electron/media/rawPreview'
-import { orientationToRotate, rotateJpegBuffer } from '../../electron/media/orientation'
+import { orientationToRotate } from '../../electron/media/orientation'
 import { RAW_EXTENSIONS } from '../../electron/media/formats'
 import type { ThumbnailPhoto } from '../../electron/media/thumbnails'
 
@@ -40,8 +40,6 @@ const DIRECT_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 const KNOWN_ORIENTATIONS = new Set([1, 3, 6, 8])
 // Real ExifTool over a handful of files only, but ARW preview extraction is heavy.
 const SLOW = 120_000
-// Camera JPEGs can be 60+ megapixels; jpeg-js allocates RGBA in memory.
-const JPEG_DECODE_OPTS = { maxMemoryUsageInMB: 512 }
 
 function walkSupported(dir: string): string[] {
   const out: string[] = []
@@ -159,13 +157,13 @@ suite(
           const bytes = fs.readFileSync(preview)
           expect(bytes.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
 
-          // jpeg-js reads the encoded frame: our rotation physically swaps the frame,
-          // so a corrected vertical shot must decode width < height here, in bare node.
-          const dims = jpeg.decode(bytes, JPEG_DECODE_OPTS)
+          // sharp reads the encoded frame: our rotation physically swaps the frame,
+          // so a corrected vertical shot must have width < height here, in bare node.
+          const dims = await sharp(bytes).metadata()
           expect(dims.width).toBeGreaterThan(0)
           expect(dims.height).toBeGreaterThan(0)
           if (photo.orientation === 6 || photo.orientation === 8) {
-            expect(dims.width).toBeLessThan(dims.height)
+            expect(dims.width).toBeLessThan(dims.height!)
           }
         },
         SLOW
@@ -195,14 +193,14 @@ suite(
         ctx.skip()
       }
       for (const photo of tagged) {
-        const rotated = await rotateJpegBuffer(
-          await fs.promises.readFile(photo.absPath),
-          photo.orientation
-        )
+        const rotated = await sharp(await fs.promises.readFile(photo.absPath))
+          .rotate(orientationToRotate(photo.orientation))
+          .jpeg()
+          .toBuffer()
         expect(rotated.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
-        const dims = jpeg.decode(rotated, JPEG_DECODE_OPTS)
+        const dims = await sharp(rotated).metadata()
         if (photo.orientation === 6 || photo.orientation === 8) {
-          expect(dims.width).toBeLessThan(dims.height)
+          expect(dims.width).toBeLessThan(dims.height!)
         }
       }
     }, SLOW)

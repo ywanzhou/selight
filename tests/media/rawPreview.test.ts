@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import sharp from 'sharp'
 import { ExiftoolReader, RawPreviewError } from '../../electron/media/rawPreview'
 import { tinyJpeg } from './fixtures'
 
@@ -105,7 +106,18 @@ describe('ExiftoolReader.extractPreview', () => {
 describe('ExiftoolReader.ensureRawPreview', () => {
   it('extracts once, rotates by orientation, caches, and serves the second call from cache', async () => {
     const cacheDir = makeCacheDir()
-    const source = tinyJpeg()
+    // 640x480 landscape buffer: after the 90deg orientation-6 rotation the
+    // cached JPEG frame must physically decode as 480x640 (width < height).
+    const source = await sharp({
+      create: {
+        width: 640,
+        height: 480,
+        channels: 3,
+        background: { r: 10, g: 20, b: 30, alpha: 1 }
+      }
+    })
+      .jpeg()
+      .toBuffer()
     const fake = makeFake({ orientation: 6, thumbnail: () => source })
     const reader = new ExiftoolReader({
       read: fake.read,
@@ -119,9 +131,8 @@ describe('ExiftoolReader.ensureRawPreview', () => {
     expect(fs.existsSync(expected)).toBe(true)
     const written = fs.readFileSync(expected)
     expect(written.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]))
-    // Orientation 6 must go through rotateJpegBuffer: cached bytes differ from
-    // the extracted source buffer.
-    expect(written.equals(source)).toBe(false)
+    const meta = await sharp(written).metadata()
+    expect(meta.width).toBeLessThan(meta.height!)
     expect(fake.extract).toHaveBeenCalledTimes(1)
 
     const cached = await reader.ensureRawPreview(photo, cacheDir)
