@@ -51,6 +51,9 @@ export interface ExportProgressEvent {
 export interface SelightHandlers {
   listBatches(): Promise<BatchRow[]>
   createBatch(name?: string): Promise<BatchRow>
+  /** Hard-delete a batch and all its rows; returns the number of photos removed. */
+  deleteBatch(batchId: number): Promise<number>
+  renameBatch(batchId: number, name: string): Promise<void>
   openBatch(batchId: number): Promise<BatchState>
 
   listFolders(batchId: number): Promise<FolderRow[]>
@@ -103,6 +106,8 @@ export interface SelightApi extends SelightHandlers {
 export const IPC_CHANNELS = {
   batchList: 'selight:batch:list',
   batchCreate: 'selight:batch:create',
+  batchDelete: 'selight:batch:delete',
+  batchRename: 'selight:batch:rename',
   batchOpen: 'selight:batch:open',
   folderList: 'selight:folder:list',
   folderCreate: 'selight:folder:create',

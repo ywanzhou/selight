@@ -100,6 +100,7 @@ app.whenReady().then(() => {
     db,
     thumbQueue,
     exifReader,
+    mediaRoots: roots,
     sessionStore,
     onExportProgress: (done, total) => {
       mainWindow?.webContents.send(IPC_CHANNELS.exportProgress, { done, total })
@@ -109,6 +110,13 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC_CHANNELS.batchList, () => handlers.listBatches())
   ipcMain.handle(IPC_CHANNELS.batchCreate, (_event, name?: string) =>
     handlers.createBatch(name)
+  )
+  ipcMain.handle(IPC_CHANNELS.batchDelete, (_event, batchId: number) =>
+    handlers.deleteBatch(batchId)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.batchRename,
+    (_event, batchId: number, name: string) => handlers.renameBatch(batchId, name)
   )
   ipcMain.handle(IPC_CHANNELS.batchOpen, (_event, batchId: number) =>
     handlers.openBatch(batchId)

@@ -1,20 +1,34 @@
+import { useState } from 'react'
 import { useAppStore } from '../state/store'
-import { ExportIcon, ImportIcon } from './icons'
+import { ExportIcon, ImportIcon, PencilIcon, TrashIcon } from './icons'
 import CreateBatchButton from './CreateBatchButton'
+import InlineNameInput from './InlineNameInput'
 
 function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
 export default function Toolbar({ onExport }: { onExport: () => void }) {
-  const { state, openBatch, importDirectory } = useAppStore()
+  const { state, openBatch, importDirectory, deleteBatch, renameBatch } = useAppStore()
   const { batches, batchId, counts, loading } = state
+  const [renaming, setRenaming] = useState(false)
+  const currentName = batches.find((b) => b.id === batchId)?.name ?? ''
 
   const total = counts?.total ?? 0
   const classified = total - (counts?.inbox ?? 0)
   const percent = total > 0 ? (classified / total) * 100 : 0
   // Export only copies status='folder' photos; zero of them means an empty output.
   const nothingToExport = (counts?.folder ?? 0) === 0
+
+  async function handleDeleteBatch(): Promise<void> {
+    if (batchId === null) return
+    const name = batches.find((b) => b.id === batchId)?.name ?? ''
+    const confirmed = window.confirm(
+      `确定删除批次「${name}」吗？\n该批次的 ${total} 张照片记录、文件夹与分类都会删除，磁盘上的原文件不会被删除，此操作不可撤销。`
+    )
+    if (!confirmed) return
+    await deleteBatch(batchId)
+  }
 
   async function handleImport() {
     const result = await importDirectory()
@@ -26,22 +40,60 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
   return (
     <header className="toolbar">
-      <select
-        className="tb-select"
-        value={batchId ?? ''}
-        disabled={batches.length === 0 || loading}
-        onChange={(e) => {
-          openBatch(Number(e.target.value)).catch(showError)
-        }}
-        aria-label="选择批次"
+      {renaming && batchId !== null ? (
+        <span className="batch-name-input">
+          <InlineNameInput
+            initialValue={currentName}
+            onCommit={(name) => {
+              setRenaming(false)
+              if (name === currentName) return
+              renameBatch(batchId, name).catch(showError)
+            }}
+            onCancel={() => setRenaming(false)}
+          />
+        </span>
+      ) : (
+        <select
+          className="tb-select"
+          value={batchId ?? ''}
+          disabled={batches.length === 0 || loading}
+          onChange={(e) => {
+            openBatch(Number(e.target.value)).catch(showError)
+          }}
+          aria-label="选择批次"
+        >
+          {batches.length === 0 && <option value="">无批次</option>}
+          {batches.map((batch) => (
+            <option key={batch.id} value={batch.id}>
+              {batch.name}
+            </option>
+          ))}
+        </select>
+      )}
+
+      <button
+        type="button"
+        className="icon-btn"
+        title="重命名当前批次"
+        aria-label="重命名当前批次"
+        disabled={batchId === null || loading}
+        onClick={() => setRenaming(true)}
       >
-        {batches.length === 0 && <option value="">无批次</option>}
-        {batches.map((batch) => (
-          <option key={batch.id} value={batch.id}>
-            {batch.name}
-          </option>
-        ))}
-      </select>
+        <PencilIcon />
+      </button>
+
+      <button
+        type="button"
+        className="icon-btn"
+        title="删除当前批次"
+        aria-label="删除当前批次"
+        disabled={batchId === null || loading}
+        onClick={() => {
+          handleDeleteBatch().catch(showError)
+        }}
+      >
+        <TrashIcon />
+      </button>
 
       <CreateBatchButton />
 

@@ -9,12 +9,14 @@ import type {
 import {
   boot,
   createBatch,
+  deleteBatch,
   exportBatch,
   importDirectory,
   openBatch,
   recoveryImport,
   reducer,
   refresh,
+  renameBatch,
   switchView,
   type AppState,
   type ThunkDeps
@@ -26,6 +28,8 @@ import {
 const HANDLER_NAMES = [
   'listBatches',
   'createBatch',
+  'deleteBatch',
+  'renameBatch',
   'openBatch',
   'listFolders',
   'createFolder',
@@ -568,6 +572,66 @@ describe('interactive thunks', () => {
     expect(create).toHaveBeenCalledWith('婚礼')
     expect(open).toHaveBeenCalledWith(1)
   })
+
+  it('deleteBatch opens the most recent remaining batch', async () => {
+    const nextBatch: BatchRow = { id: 2, name: 'second', createdAt: 3, lastOpenedAt: 4 }
+    const nextOpened: BatchState = {
+      batch: nextBatch,
+      folders: [],
+      counts: zeroCounts,
+      photos: []
+    }
+    const del = vi.fn(async () => 1)
+    const open = vi.fn(async () => nextOpened)
+    const api = makeApi({
+      deleteBatch: del,
+      listBatches: vi.fn(async () => [nextBatch]),
+      openBatch: open,
+      listView: vi.fn(async () => []),
+      counts: vi.fn(async () => zeroCounts),
+      listFolders: vi.fn(async () => [])
+    })
+    const h = harness(api)
+    h.dispatch({ type: 'opened', state: opened })
+
+    await deleteBatch(h.deps, 1)
+
+    expect(del).toHaveBeenCalledWith(1)
+    expect(open).toHaveBeenCalledWith(2)
+    expect(h.state.batchId).toBe(2)
+  })
+
+  it('renameBatch calls the bridge and refreshes the dropdown list', async () => {
+    const renamed: BatchRow = { ...batch, name: '婚礼正片' }
+    const rename = vi.fn(async () => undefined)
+    const api = makeApi({
+      renameBatch: rename,
+      listBatches: vi.fn(async () => [renamed])
+    })
+    const h = harness(api)
+    h.dispatch({ type: 'opened', state: opened })
+
+    await renameBatch(h.deps, 1, '婚礼正片')
+
+    expect(rename).toHaveBeenCalledWith(1, '婚礼正片')
+    expect(h.state.batches).toEqual([renamed])
+  })
+
+  it('deleteBatch lands on the empty workspace when no batches remain', async () => {
+    const api = makeApi({
+      deleteBatch: vi.fn(async () => 0),
+      listBatches: vi.fn(async () => [])
+    })
+    const h = harness(api)
+    h.dispatch({ type: 'opened', state: opened })
+
+    await deleteBatch(h.deps, 1)
+
+    expect(h.state.batchId).toBeNull()
+    expect(h.state.photos).toEqual([])
+    expect(h.state.counts).toBeNull()
+    expect(h.state.view).toEqual({ kind: 'inbox' })
+  })
 })
 
 describe('reducer', () => {
@@ -581,5 +645,20 @@ describe('reducer', () => {
   it('returns the same state for unknown actions', () => {
     const state = harness(makeApi()).state
     expect(reducer(state, { type: 'unknown' } as never)).toBe(state)
+  })
+
+  it('closed resets an open batch back to the empty workspace', () => {
+    const state: AppState = {
+      ...harness(makeApi()).state,
+      batchId: 7,
+      counts: zeroCounts,
+      photos: [{ id: 1 } as AppState['photos'][number]]
+    }
+    const next = reducer(state, { type: 'closed' })
+    expect(next.batchId).toBeNull()
+    expect(next.view).toEqual({ kind: 'inbox' })
+    expect(next.photos).toEqual([])
+    expect(next.folders).toEqual([])
+    expect(next.counts).toBeNull()
   })
 })

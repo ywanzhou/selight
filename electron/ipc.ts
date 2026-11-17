@@ -1,5 +1,15 @@
 import type { Database } from 'better-sqlite3'
-import { createBatch, getBatch, listBatches, touchBatch } from './domain/batches'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import {
+  createBatch,
+  deleteBatch,
+  getBatch,
+  listBatches,
+  renameBatch,
+  touchBatch
+} from './domain/batches'
+import type { MediaRoots } from './media/resolve'
 import { createFolder, listFolders, renameFolder } from './domain/folders'
 import { counts, listPhotos } from './domain/photos'
 import {
@@ -29,6 +39,8 @@ export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   exifReader: ExifReader
+  /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
+  mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>
   // Renderer push has no place in the pure factory: main.ts injects webContents.send,
   // contract tests inject a recording stub.
@@ -77,7 +89,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, exifReader, sessionStore, onExportProgress } = deps
+  const { db, thumbQueue, exifReader, mediaRoots, sessionStore, onExportProgress } = deps
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -87,6 +99,29 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
 
     async createBatch(name) {
       return createBatch(db, name)
+    },
+
+    async deleteBatch(batchId) {
+      const photoIds = deleteBatch(db, batchId)
+      // Best-effort cache cleanup: a locked or just-written file must not fail
+      // the already-committed deletion. AUTOINCREMENT ids are never reused, so
+      // any straggler is a harmless orphan covered by the cache-GC backlog.
+      await Promise.all(
+        photoIds.flatMap((id) => [
+          fs.rm(path.join(mediaRoots.thumbDir, `${id}.jpg`), { force: true }).catch(() => undefined),
+          fs
+            .rm(path.join(mediaRoots.thumbDir, `${id}.jpg.placeholder`), { force: true })
+            .catch(() => undefined),
+          fs
+            .rm(path.join(mediaRoots.previewDir, `${id}.jpg`), { force: true })
+            .catch(() => undefined)
+        ])
+      )
+      return photoIds.length
+    },
+
+    async renameBatch(batchId, name) {
+      renameBatch(db, batchId, name)
     },
 
     async openBatch(batchId) {

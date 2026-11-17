@@ -6,6 +6,9 @@ import { IPC_CHANNELS, type SelightApi } from './shared/api'
 const api: SelightApi = {
   listBatches: () => ipcRenderer.invoke(IPC_CHANNELS.batchList),
   createBatch: (name) => ipcRenderer.invoke(IPC_CHANNELS.batchCreate, name),
+  deleteBatch: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.batchDelete, batchId),
+  renameBatch: (batchId, name) =>
+    ipcRenderer.invoke(IPC_CHANNELS.batchRename, batchId, name),
   openBatch: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.batchOpen, batchId),
 
   listFolders: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.folderList, batchId),
