@@ -63,7 +63,14 @@ mac build 配置+解包 glob+icns（能出未签名 dmg）→ hiddenInset 布局
 1. **大批量导入卡死（900+ 张，无分页）**：`listPhotos`（electron/domain/photos.ts:134）无 LIMIT，整个视图一次性经 IPC 全量进渲染层 state；react-window 只虚拟化了 DOM，缩略图任务仍按全量入队（MediaQueue 并发 2，JPG 走整文件读取+jpeg-js 解码旋转，webp 走 Blink helper IPC 往返），导入扫描本身 exiftool stay-open 串行约 28ms/张（900 张约 25s 主进程繁忙）。方向：查询分页/窗口化 + 缩略图按需生成（仅视口附近 enqueue）+ 导入进度可取消；先 profile 确认卡点是 IPC 全量、主进程解码还是 exiftool 扫描。与中优先 #8 相关。
 2. **单张超大尺寸照片内存卡死**：两处全尺寸解码均无尺寸护栏——(a) 主进程 `rotateJpegBuffer`（media/orientation.ts:17）调 jpeg-autorotate 的 rotateBuffer，jpeg-js 把整张 JPEG 解码成 RGBA 裸缓冲（1 亿像素约 400MB+），随后 nativeImage 再解码一遍，队列并发 2 可叠加 OOM；(b) 渲染层 PreviewPane 的 `<img src=selight://photo/id>` 由 resolve.ts 直接返回**原文件**全尺寸字节，Blink 解码同样吃满渲染进程内存，webp 走 Blink helper 的 createImageBitmap 同理。方向：导入期读 width/height（本 backlog I5 已是前置）、超阈值走降采样/分区解码、预览改为受限尺寸的 preview 副本而非原图。
 3. **"导出的是配置文件而非分类产物"（待复现，与代码现状不符）**：现 `exportBatch`（electron/exporter.ts:69）实际是 `copyFile` 真实拷贝——按文件夹名在输出目录建子目录，只导出 status='folder' 的照片，inbox/回收站不导出，带进度与 failures。用户观察到的"配置文件"疑似：(a) userData 下自动保存的 session.json 被误认为导出物；(b) 没有任何已入文件夹的照片时导出结果为空目录。需与用户复现确认实际操作路径后再定方案（若诉求是"导出清单/配置"则是新需求，若为空目录则属 UX 提示问题：导出前应提示将拷贝 0 张）。**（2026-11-17 部分完成：空导出路径已封死——`counts.folder === 0` 时工具栏导出按钮禁用，外层 span 挂 title 说明原因；"配置文件"复现疑问仍待用户确认操作路径。）**
-4. **新建批次支持自定义命名**：后端已就绪——`createBatch(db, name?)`（domain/batches.ts:36）与 IPC batchCreate 都透传可选 name，缺省才回退 `localDate()`。缺口纯在 UI：App.tsx:30 与 store.ts:143 的 `createBatch()` 均未传参。方向：复用 InlineNameInput 做命名输入（允许留空走日期默认），store/preload 签名补可选 name 参数。**（2026-11-17 已完成：新增 CreateBatchButton（工具栏与空状态页复用），InlineNameInput 加 allowBlank 支持留空走日期默认，store thunk 透传可选 name；preload/domain 本已就绪。）**
+4. **新建批次支持自定义命名**：后端已就绪——`createBatch(db, name?)`（domain/batches.ts:36）与 IPC batchCreate 都透传可选 name，缺省才回退 `localDate()`。缺口纯在 UI：App.tsx:30 与 store.ts:143 的 `createBatch()` 均未传参。方向：复用 InlineNameInput 做命名输入（允许留空走日期默认），store/preload 签名补可选 name 参数。**（2026-11-17 已完成：新增 CreateBatchButton（工具栏与空状态页复用），InlineNameInput 加 allowBlank 支持留空走日期默认，store thunk 透传可选 name；preload/domain 本已就绪。同日补齐批次重命名：renameBatch 全链路 + 工具栏铅笔按钮原位内联编辑，不碰 last_opened_at 以保下拉排序；批次名无唯一约束（日期默认名允许重复），故不做冲突校验。）**
+
+## 计划外完成项（2026-11-17）
+
+- **批次硬删除**：用户确认采用硬删而非软删（软删需 schema v3 迁移与恢复入口，成本不匹配）。`deleteBatch` 单事务按 FK 顺序删 actions → photos → folders → sources → batches，返回照片 id 由 IPC 层尽力清理 thumbnails/previews 缓存（单个文件失败不影响已提交删除）；工具栏确认弹窗明示不可撤销、原文件不动；删后自动打开最近批次或回到空工作区。已知残留：删除瞬间在写的缩略图任务可能留孤儿缓存，AUTOINCREMENT id 不复用故无正确性问题，归缓存 GC（中优先 #9）兜底。
+- **预览大图可拖拽 + 拖拽后自动预览下一张**：预览舞台成为 HTML5 拖拽源（载荷契约与缩略图网格一致）；FolderCard/TrashCard 的 drop 处理改用 pinSelection/nextSelectionId，替代原来的 selection.clear()，拖放后锚点自动落到下一张剩余照片。
+- **回收站改为底部固定横条**：TrashCard 移出滚动的 .cards 网格，文件夹再多也无需滚动即可拖放。
+- **0 键移回待分类**：moveToInbox 领域动作（单动作组、可 Ctrl+Z），仅文件夹视图响应，避免给 inbox/trash 照片写无意义动作行污染撤销栈。
 
 ## 总审 wontfix 记录（接受现状）
 
