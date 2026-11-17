@@ -502,6 +502,12 @@ button:disabled {
   flex-shrink: 0;
 }
 
+/* Keeps the wrapped toolbar button in normal flow while the span owns the
+   disabled-state tooltip (disabled buttons emit no mouse events themselves). */
+.tb-btn-wrap {
+  display: inline-flex;
+}
+
 /* ---- folder card context menu ---- */
 .context-menu {
   position: fixed;

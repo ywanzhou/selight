@@ -13,6 +13,8 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
   const total = counts?.total ?? 0
   const classified = total - (counts?.inbox ?? 0)
   const percent = total > 0 ? (classified / total) * 100 : 0
+  // Export only copies status='folder' photos; zero of them means an empty output.
+  const nothingToExport = (counts?.folder ?? 0) === 0
 
   async function handleImport() {
     const result = await importDirectory()
@@ -55,15 +57,22 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
         导入文件夹
       </button>
 
-      <button
-        type="button"
-        className="tb-btn"
-        disabled={batchId === null || loading}
-        onClick={onExport}
+      {/* Wrapper span carries the tooltip: a disabled button itself never fires
+          mouse events, so its own title would never appear. */}
+      <span
+        className="tb-btn-wrap"
+        title={nothingToExport ? '还没有分配到文件夹的照片，暂无可导出内容' : undefined}
       >
-        <ExportIcon />
-        导出
-      </button>
+        <button
+          type="button"
+          className="tb-btn"
+          disabled={batchId === null || loading || nothingToExport}
+          onClick={onExport}
+        >
+          <ExportIcon />
+          导出
+        </button>
+      </span>
 
       <div className="tb-progress">
         <span>
