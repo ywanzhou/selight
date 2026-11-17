@@ -186,6 +186,26 @@ export function createThumbnailQueue(
     if (RAW_EXTENSIONS.has(row.ext.toLowerCase()) && row.width === null && reader) {
       // enrichPhoto is a no-op once another path wins the race and fills width.
       await enrichPhoto(db, id, reader)
+      // The in-memory row still holds the pre-heal orientation 1: re-read it,
+      // or ensureRawPreview would rotate by the stale value and cache a
+      // wrong-orientation thumbnail permanently.
+      const healed = db
+        .prepare('SELECT orientation, width FROM photos WHERE id = ?')
+        .get(id) as { orientation: number; width: number | null } | undefined
+      if (healed === undefined || healed.width === null) {
+        // Self-heal failed: never cache a guessed orientation. Reuse the
+        // missing-photo placeholder contract without touching the DB, leaving
+        // width NULL so openBatch catch-up can retry later.
+        const result = await ensureThumbnail(
+          { ...row, missing: 1 },
+          roots.thumbDir,
+          { previewDir: roots.previewDir, reader }
+        )
+        onReady?.(id, result.placeholder === false)
+        return
+      }
+      row.orientation = healed.orientation
+      row.width = healed.width
     }
 
     const result = await ensureThumbnail(row, roots.thumbDir, {

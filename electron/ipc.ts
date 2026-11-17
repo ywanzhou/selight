@@ -39,7 +39,7 @@ export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
   /** Background metadata enrichment (orientation/dimensions); main.ts wires the real service. */
-  enrichment: Pick<EnrichmentService, 'submit' | 'stop'>
+  enrichment: Pick<EnrichmentService, 'submit'>
   /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
   mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>

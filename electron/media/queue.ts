@@ -31,7 +31,9 @@ export class MediaQueue {
   // front so viewport signals can overtake bulk work, then fresh ids join the
   // front in input order.
   prioritize(ids: number[]): void {
-    const movable = ids.filter((id) => !this.active.has(id))
+    // Input may repeat (rapid viewport signals); active ids stay running and
+    // duplicates collapse to one queue entry each.
+    const movable = [...new Set(ids)].filter((id) => !this.active.has(id))
     if (movable.length === 0) return
     for (const id of movable) {
       const index = this.queued.indexOf(id)

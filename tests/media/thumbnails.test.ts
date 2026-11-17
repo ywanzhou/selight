@@ -339,6 +339,73 @@ describe('ensureThumbnail sharp pipeline', () => {
       expect(onReady).toHaveBeenCalledWith(id, true)
     })
 
+    it('refreshes the healed row so RAW preview extraction receives the new orientation', async () => {
+      const id = insertRawRow()
+      const readImageMeta = vi.fn(async () => ({
+        orientation: 6,
+        width: 6000,
+        height: 4000
+      }))
+      // Simulate the real ExiftoolReader: rotate the extracted preview by the
+      // orientation carried in its input argument. A stale orientation 1 would
+      // leave this frame landscape and cache the wrong thumbnail permanently.
+      const extracted: Array<{ id: number; orientation: number }> = []
+      const ensureRawPreview = vi.fn(async (photo: { id: number; orientation: number }) => {
+        extracted.push({ id: photo.id, orientation: photo.orientation })
+        const file = path.join(previewDir, `${id}.jpg`)
+        await sharp({
+          create: { width: 640, height: 480, channels: 3, background: { r: 1, g: 2, b: 3 } }
+        })
+          .rotate(photo.orientation === 6 ? 90 : 0)
+          .jpeg()
+          .toFile(file)
+        return file
+      })
+      const queue = createThumbnailQueue(
+        db,
+        { thumbDir, previewDir },
+        { readImageMeta, ensureRawPreview },
+        vi.fn()
+      )
+
+      queue.enqueue([id])
+      await drain(queue)
+      queue.stop()
+
+      expect(extracted).toEqual([{ id, orientation: 6 }])
+      const thumbMeta = await sharp(path.join(thumbDir, `${id}.jpg`)).metadata()
+      expect(thumbMeta.width!).toBeLessThan(thumbMeta.height!)
+    })
+
+    it('degrades to a placeholder when RAW self-heal fails instead of caching a guessed orientation', async () => {
+      const id = insertRawRow()
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const readImageMeta = vi.fn(async () => {
+        throw new Error('exiftool unavailable')
+      })
+      const ensureRawPreview = vi.fn()
+      const onReady = vi.fn()
+      const queue = createThumbnailQueue(
+        db,
+        { thumbDir, previewDir },
+        { readImageMeta, ensureRawPreview },
+        onReady
+      )
+
+      queue.enqueue([id])
+      await drain(queue)
+      queue.stop()
+
+      expect(ensureRawPreview).not.toHaveBeenCalled()
+      expect(fs.existsSync(`${path.join(thumbDir, `${id}.jpg`)}.placeholder`)).toBe(true)
+      expect(onReady).toHaveBeenCalledWith(id, false)
+      // The NULL marker survives so openBatch catch-up can retry later.
+      const row = db.prepare('SELECT width FROM photos WHERE id = ?').get(id) as {
+        width: number | null
+      }
+      expect(row.width).toBeNull()
+    })
+
     it('reports ready ok:false and keeps the sidecar when generation fails', async () => {
       const dir = makeCacheDir()
       const source = path.join(dir, 'broken.jpg')

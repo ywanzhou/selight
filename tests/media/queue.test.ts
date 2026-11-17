@@ -155,6 +155,35 @@ describe('MediaQueue.prioritize', () => {
     expect(queue.pending).toHaveLength(0)
   })
 
+  it('deduplicates ids inside a single prioritize call', async () => {
+    const gates = new Map<number, ReturnType<typeof gate>>()
+    const calls: number[] = []
+    const queue = new MediaQueue(async (id) => {
+      calls.push(id)
+      let g = gates.get(id)
+      if (!g) {
+        g = gate()
+        gates.set(id, g)
+      }
+      await g.promise
+    }, 1)
+
+    queue.enqueue([1, 2, 3])
+    await flushMicrotasks()
+    queue.prioritize([5, 5, 5])
+    expect([...queue.pending].filter((id) => id === 5)).toHaveLength(1)
+
+    // Register before releasing: onIdle only fires on the drain transition.
+    const drained = new Promise<void>((resolve) => queue.onIdle(() => resolve()))
+    for (const id of [1, 5, 2, 3]) {
+      gates.get(id)!.release()
+      await flushMicrotasks()
+    }
+    await drained
+    // Duplicate queue entries would otherwise run the worker twice.
+    expect(calls.filter((id) => id === 5)).toHaveLength(1)
+  })
+
   it('drains prioritized ids before ordinary queued ids', async () => {
     const order: number[] = []
     const gates = new Map<number, ReturnType<typeof gate>>()

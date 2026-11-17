@@ -206,9 +206,21 @@ app.whenReady().then(async () => {
 
     // --------------------------------------------- RAW self-heal (samples only)
     let rawSelfHeal: Record<string, unknown> | null = null
-    const sampleArw = fs.existsSync(SAMPLES)
-      ? walkFiles(SAMPLES).find((f) => f.toLowerCase().endsWith('.arw'))
-      : undefined
+    const sampleArws = fs.existsSync(SAMPLES)
+      ? walkFiles(SAMPLES).filter((f) => f.toLowerCase().endsWith('.arw'))
+      : []
+    // Prefer a vertical ARW so the end-to-end orientation invariant is checked,
+    // not just the call ordering: the cached thumbnail must physically rotate.
+    const sampleReader = new ExiftoolReader()
+    let sampleArw: string | undefined
+    for (const candidate of sampleArws) {
+      const meta = await sampleReader.readImageMeta(candidate, '.arw')
+      if (meta.orientation === 6 || meta.orientation === 8) {
+        sampleArw = candidate
+        break
+      }
+    }
+    sampleArw ??= sampleArws[0]
     if (sampleArw) {
       const rawId = insertPhoto(db, batchId, sourceId, sampleArw, '.arw')
       const before = db
@@ -229,15 +241,26 @@ app.whenReady().then(async () => {
       const after = db
         .prepare('SELECT orientation, width, height FROM photos WHERE id = ?')
         .get(rawId) as { orientation: number; width: number | null; height: number | null }
+      const thumbDims = await sharp(path.join(thumbDir, `${rawId}.jpg`)).metadata()
       rawSelfHeal = {
         startedUnenriched: before.width === null,
         enriched: after.width !== null,
         ready: ready.at(-1),
-        vertical: after.orientation === 6 || after.orientation === 8
+        orientation: after.orientation,
+        thumb: { width: thumbDims.width, height: thumbDims.height }
       }
       if (before.width !== null) fail('RAW fixture expected to start unenriched')
       if (after.width === null) fail('RAW self-heal did not fill dimensions')
       if (ready.at(-1)?.[1] !== true) fail('RAW thumbnail did not report ready ok:true')
+      if (
+        (after.orientation === 6 || after.orientation === 8) &&
+        (thumbDims.width ?? 0) >= (thumbDims.height ?? 0)
+      ) {
+        fail(
+          `vertical RAW self-heal cached a landscape thumbnail ` +
+            `${thumbDims.width}x${thumbDims.height}`
+        )
+      }
       await exiftool.end()
     }
 
