@@ -9,11 +9,6 @@ export interface ScannedFile {
   ext: string
   sizeBytes: number
   mtime: number
-  orientation: number
-}
-
-export interface ExifReader {
-  readOrientation(absPath: string, ext: string): Promise<number>
 }
 
 // Direct-read formats and RAW containers from the design spec; matched case-insensitively.
@@ -43,19 +38,19 @@ export interface ScanResult {
   failures: string[]
 }
 
-export async function scanDirectory(
-  root: string,
-  reader: ExifReader
-): Promise<ScanResult> {
+// Discovery is deliberately fs-only: readdir + stat + extension filtering.
+// EXIF orientation and pixel dimensions are enriched later in the background so
+// a large import returns in seconds instead of paying one exiftool round trip
+// per file on the critical path.
+export async function scanDirectory(root: string): Promise<ScanResult> {
   const files: ScannedFile[] = []
   const failures: string[] = []
-  await walk(root, reader, files, failures)
+  await walk(root, files, failures)
   return { files, failures }
 }
 
 async function walk(
   dir: string,
-  reader: ExifReader,
   out: ScannedFile[],
   failures: string[]
 ): Promise<void> {
@@ -71,7 +66,7 @@ async function walk(
   for (const entry of entries) {
     const absPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await walk(absPath, reader, out, failures)
+      await walk(absPath, out, failures)
       continue
     }
     if (!entry.isFile()) continue
@@ -88,20 +83,12 @@ async function walk(
       continue
     }
 
-    let orientation = 1
-    try {
-      orientation = await reader.readOrientation(absPath, ext)
-    } catch {
-      orientation = 1
-    }
-
     out.push({
       absPath,
       filename: entry.name,
       ext,
       sizeBytes: stats.size,
-      mtime: Math.round(stats.mtimeMs),
-      orientation
+      mtime: Math.round(stats.mtimeMs)
     })
   }
 }
@@ -125,17 +112,17 @@ export function importScanned(
         filename: file.filename,
         ext: file.ext,
         sizeBytes: file.sizeBytes,
-        mtime: file.mtime,
-        orientation: file.orientation
+        mtime: file.mtime
       })
       if (created) added += 1
       else updated += 1
       presentPaths.push(file.absPath)
     }
 
-    // Ruling 9: an unchanged upsert is a no-op and cannot clear missing, so explicitly reset
-    // the flag for rows present in this scan before marking the absent ones. Reset and mark
-    // are both scoped to this source, so other roots imported into the batch are untouched.
+    // Ruling 9: an unchanged upsert is a no-op and cannot clear missing, so explicitly
+    // reset the flag for rows present in this scan before marking the absent ones.
+    // Reset and mark are both scoped to this source, so other roots imported into
+    // the batch are untouched.
     for (let i = 0; i < presentPaths.length; i += RESET_CHUNK) {
       const slice = presentPaths.slice(i, i + RESET_CHUNK)
       db.prepare(

@@ -59,8 +59,7 @@ function makeInput(
     filename: path.basename(absPath),
     ext: path.extname(absPath),
     sizeBytes: 1024,
-    mtime: 1_700_000_000_000,
-    orientation: 1
+    mtime: 1_700_000_000_000
   }
 }
 

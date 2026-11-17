@@ -20,7 +20,7 @@ import {
   restoreFromTrash
 } from './domain/classify'
 import { undoLastGroup } from './domain/actions'
-import { importScanned, scanDirectory, type ExifReader } from './scanner'
+import { importScanned, scanDirectory } from './scanner'
 import { exportBatch as runExport } from './exporter'
 import type { MediaQueue } from './media/queue'
 import type { SessionStore } from './session'
@@ -38,7 +38,11 @@ import type {
 export interface HandlerDeps {
   db: Database
   thumbQueue: Pick<MediaQueue, 'enqueue' | 'prioritize'>
-  exifReader: ExifReader
+  /** Background metadata enrichment (orientation/dimensions); main.ts wires the real service. */
+  enrichment: {
+    submit(ids: number[]): void
+    stop(): void
+  }
   /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
   mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>
@@ -89,7 +93,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, exifReader, mediaRoots, sessionStore, onExportProgress } = deps
+  const { db, thumbQueue, enrichment, mediaRoots, sessionStore, onExportProgress } = deps
 
   return {
     // ---- batches ----------------------------------------------------------
@@ -158,9 +162,11 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
     // ---- photos -----------------------------------------------------------
     async importDirectory(batchId, rootPath) {
       const sourceId = upsertSource(db, batchId, rootPath)
-      const { files, failures } = await scanDirectory(rootPath, exifReader)
+      // fs-only discovery: no exiftool on the critical path; rows land with the
+      // orientation DEFAULT 1 and NULL dimensions for the enrichment service.
+      const { files, failures } = await scanDirectory(rootPath)
       const result = importScanned(db, batchId, sourceId, files)
-      thumbQueue.enqueue(photoIdsForPaths(db, batchId, files.map((file) => file.absPath)))
+      enrichment.submit(photoIdsForPaths(db, batchId, files.map((file) => file.absPath)))
       const out: ImportResult = { ...result, failures }
       return out
     },

@@ -2,8 +2,13 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
 import { exiftool } from 'exiftool-vendored'
-import type { ExifReader } from '../scanner'
 import { orientationToRotate } from './orientation'
+
+// Metadata reader contract, injected into enrichment and the thumbnail queue.
+// Lives next to its production ExiftoolReader instead of the fs-only scanner.
+export interface ExifReader {
+  readOrientation(absPath: string, ext: string): Promise<number>
+}
 
 export class RawPreviewError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

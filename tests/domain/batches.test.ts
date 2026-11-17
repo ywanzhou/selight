@@ -123,8 +123,7 @@ describe('batch domain module', () => {
       filename: '1.jpg',
       ext: '.jpg',
       sizeBytes: 1,
-      mtime: 1,
-      orientation: 1
+      mtime: 1
     }).row.id
     // Produces an actions row referencing the batch, photo and folder.
     assignToFolder(db, [photoId], folder.id)

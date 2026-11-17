@@ -8,6 +8,7 @@ import { createBatch } from '../../electron/domain/batches'
 import { createFolder } from '../../electron/domain/folders'
 import {
   counts,
+  findUnenrichedPhotoIds,
   listPhotos,
   markMissing,
   upsertPhoto,
@@ -64,7 +65,6 @@ function makeInput(
     ext: path.extname(absPath),
     sizeBytes: 1024,
     mtime: 1_700_000_000_000,
-    orientation: 1,
     ...overrides
   }
 }
@@ -110,6 +110,29 @@ describe('photo domain module', () => {
     // SQL defaults floor epoch millis to the second; allow the same tolerance as the folders suite.
     expect(row.createdAt).toBeGreaterThanOrEqual(before - 1000)
     expect(row.updatedAt).toBeLessThanOrEqual(after + 1000)
+  })
+
+  it('findUnenrichedPhotoIds returns only width-NULL rows in id order, scoped to the batch', () => {
+    const db = tempDb()
+    const batchA = createBatch(db)
+    const batchB = createBatch(db)
+    const a = upsertPhoto(db, makeInput(db, batchA.id, 'E:/photos/a.jpg')).row
+    const b = upsertPhoto(db, makeInput(db, batchA.id, 'E:/photos/b.jpg')).row
+    const c = upsertPhoto(db, makeInput(db, batchB.id, 'E:/photos/c.jpg')).row
+
+    // Both batches start fully unenriched.
+    expect(findUnenrichedPhotoIds(db, batchA.id)).toEqual([a.id, b.id])
+    expect(findUnenrichedPhotoIds(db, batchB.id)).toEqual([c.id])
+
+    // Only a successful enrichment write removes a row from the selection.
+    db.prepare('UPDATE photos SET orientation = 6, width = 480, height = 640 WHERE id = ?').run(
+      a.id
+    )
+    expect(findUnenrichedPhotoIds(db, batchA.id)).toEqual([b.id])
+
+    // Failed enrichment must keep the NULL marker so catch-up can retry.
+    db.prepare('UPDATE photos SET orientation = 1 WHERE id = ?').run(b.id)
+    expect(findUnenrichedPhotoIds(db, batchA.id)).toEqual([b.id])
   })
 
   it('re-upserts the same batch + absPath with created=false and no new row', () => {

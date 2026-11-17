@@ -92,7 +92,7 @@ suite(
       reader = new ExiftoolReader()
       const batchId = createBatch(db, 'raw samples').id
 
-      const scan = await scanDirectory(SAMPLES, reader)
+      const scan = await scanDirectory(SAMPLES)
       expect(scan.failures).toEqual([])
       expect(scan.files).toHaveLength(sampleFiles.length)
       const sourceId = Number(

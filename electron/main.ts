@@ -74,10 +74,21 @@ app.whenReady().then(() => {
   const exifReader = new ExiftoolReader()
   thumbQueue = createThumbnailQueue(db, roots, exifReader)
   sessionStore = createFileSessionStore(path.join(userData, 'session.json'))
+  // Placeholder until the EnrichmentService lands: discovery rows keep their
+  // DEFAULT orientation and NULL dimensions; the real service replaces this
+  // without touching the handler contract.
+  const enrichment = {
+    submit: (_ids: number[]): void => {
+      /* wired by the enrichment task */
+    },
+    stop: (): void => {
+      /* no-op placeholder */
+    }
+  }
   const handlers = createHandlers({
     db,
     thumbQueue,
-    exifReader,
+    enrichment,
     mediaRoots: roots,
     sessionStore,
     onExportProgress: (done, total) => {

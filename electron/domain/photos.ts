@@ -15,11 +15,13 @@ export interface PhotoInput {
   ext: string
   sizeBytes: number
   mtime: number
-  orientation: number
 }
 
 export interface PhotoRow extends PhotoInput {
   id: number
+  // Orientation stays a DB column but is no longer part of the discovery input:
+  // it is written by the enrichment pass and read back here.
+  orientation: number
   width: number | null
   height: number | null
   thumbPath: string | null
@@ -97,16 +99,15 @@ export function upsertPhoto(
     const info = db
       .prepare(
         `INSERT INTO photos
-           (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, orientation, status)
+           (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, status)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, 'inbox')
+           (?, ?, ?, ?, ?, ?, ?, 'inbox')
          ON CONFLICT(batch_id, abs_path) DO UPDATE SET
            source_id = excluded.source_id,
            filename = excluded.filename,
            ext = excluded.ext,
            size_bytes = excluded.size_bytes,
            mtime = excluded.mtime,
-           orientation = excluded.orientation,
            updated_at = ?
          WHERE photos.mtime IS NOT excluded.mtime
             OR photos.size_bytes IS NOT excluded.size_bytes`
@@ -119,7 +120,6 @@ export function upsertPhoto(
         input.ext,
         input.sizeBytes,
         input.mtime,
-        input.orientation,
         Date.now()
       )
 
@@ -147,6 +147,17 @@ export function listPhotos(db: Database, batchId: number, view: View): PhotoRow[
     .prepare(`SELECT ${COLUMNS} FROM photos WHERE ${where} ORDER BY abs_path`)
     .all(...params) as PhotoSnake[]
   return rows.map(mapRow)
+}
+
+// The single "not yet enriched" marker: width IS NULL means no enrichment pass
+// has ever succeeded for the row (orientation has a DEFAULT 1 and cannot tell
+// "unread" from "genuinely 1"). Both the open-batch catch-up and the thumbnail
+// worker's RAW self-heal select through this query.
+export function findUnenrichedPhotoIds(db: Database, batchId: number): number[] {
+  const rows = db
+    .prepare('SELECT id FROM photos WHERE batch_id = ? AND width IS NULL ORDER BY id')
+    .all(batchId) as { id: number }[]
+  return rows.map((row) => row.id)
 }
 
 export function counts(

@@ -5,24 +5,22 @@ import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import { openDatabase } from '../electron/db/schema'
 import { createHandlers, type HandlerDeps } from '../electron/ipc'
-import type { ExifReader } from '../electron/scanner'
 import type { MediaQueue } from '../electron/media/queue'
 import type { SessionState, SessionStore } from '../electron/session'
 import { IPC_CHANNELS, type SelightApi, type SelightHandlers } from '../electron/shared/api'
 
 // This suite is the end-to-end domain chain driven through the pure handler factory.
 // It must never import electron: createHandlers takes every dependency (db, queue,
-// cache roots, exif reader) up front, so the whole IPC contract runs under bare Node.
+// enrichment, cache roots) up front, so the whole IPC contract runs under bare Node.
 
 const dirs: string[] = []
 const handles: Database[] = []
-
-const fakeReader: ExifReader = { readOrientation: async () => 1 }
 
 interface Setup {
   handlers: SelightHandlers
   db: Database
   queueCalls: { enqueue: number[][]; prioritize: number[][] }
+  enrichmentCalls: number[][]
   sessionStore: SessionStore
   progressCalls: Array<[number, number]>
   mediaRoots: { thumbDir: string; previewDir: string }
@@ -49,6 +47,14 @@ function setup(): Setup {
     prioritize: (ids) => queueCalls.prioritize.push([...ids])
   }
 
+  // Recording stand-in for the EnrichmentService: imports submit freshly
+  // discovered ids here instead of touching the thumbnail queue directly.
+  const enrichmentCalls: number[][] = []
+  const enrichment = {
+    submit: (ids: number[]) => enrichmentCalls.push([...ids]),
+    stop: () => undefined
+  }
+
   // Fake session storage: the handler stays electron-free; the real file store is
   // covered in tests/domain/session.test.ts.
   const sessionStore: SessionStore = {
@@ -61,12 +67,20 @@ function setup(): Setup {
   const deps: HandlerDeps = {
     db,
     thumbQueue,
-    exifReader: fakeReader,
+    enrichment,
     mediaRoots,
     sessionStore,
     onExportProgress: (done, total) => progressCalls.push([done, total])
   }
-  return { handlers: createHandlers(deps), db, queueCalls, sessionStore, progressCalls, mediaRoots }
+  return {
+    handlers: createHandlers(deps),
+    db,
+    queueCalls,
+    enrichmentCalls,
+    sessionStore,
+    progressCalls,
+    mediaRoots
+  }
 }
 
 afterEach(() => {
@@ -128,7 +142,7 @@ async function expectRejectName(fn: () => Promise<unknown>, name: string): Promi
 
 describe('IPC handler contract — full curation chain', () => {
   it('runs batch → folder → import → assign → counts → trash → restore → delete → undo through the handlers', async () => {
-    const { handlers, queueCalls } = setup()
+    const { handlers, queueCalls, enrichmentCalls } = setup()
 
     const batch = await handlers.createBatch()
     expect(batch.id).toBeGreaterThan(0)
@@ -137,15 +151,17 @@ describe('IPC handler contract — full curation chain', () => {
     const folder = await handlers.createFolder(batch.id, '精选')
     const root = makeFixtureTree()
 
-    // Import: four supported photos, no failures, and every imported id is queued for thumbs.
+    // Import: four supported photos, no failures, and every imported id is submitted
+    // for background enrichment rather than pushed straight into the thumbnail queue.
     const imported = await handlers.importDirectory(batch.id, root)
     expect(imported).toEqual({ added: 4, updated: 0, missing: 0, failures: [] })
     const inbox = await handlers.listView(batch.id, { kind: 'inbox' })
     expect(inbox).toHaveLength(4)
     expect(inbox.every((p) => p.status === 'inbox')).toBe(true)
     const inboxIds = inbox.map((p) => p.id)
-    expect(queueCalls.enqueue).toHaveLength(1)
-    expect(new Set(queueCalls.enqueue[0])).toEqual(new Set(inboxIds))
+    expect(enrichmentCalls).toHaveLength(1)
+    expect(new Set(enrichmentCalls[0])).toEqual(new Set(inboxIds))
+    expect(queueCalls.enqueue).toHaveLength(0)
 
     expect(await handlers.counts(batch.id)).toEqual({
       total: 4,

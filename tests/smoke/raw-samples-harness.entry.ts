@@ -23,7 +23,6 @@ import { exiftool } from 'exiftool-vendored'
 import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import { importScanned, scanDirectory } from '../../electron/scanner'
-import { ExiftoolReader } from '../../electron/media/rawPreview'
 import {
   ensureThumbnail,
   PLACEHOLDER_JPEG_BYTES,
@@ -98,8 +97,7 @@ app.whenReady().then(async () => {
         .run(batchId, SAMPLES).lastInsertRowid
     )
 
-    const reader = new ExiftoolReader()
-    const scan = await scanDirectory(SAMPLES, reader)
+    const scan = await scanDirectory(SAMPLES)
     if (scan.failures.length !== 0) fail(`scan failures: ${scan.failures.join('; ')}`)
     const imported = importScanned(db, batchId, sourceId, scan.files)
     if (imported.added !== sampleFiles.length) {

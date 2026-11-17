@@ -9,12 +9,10 @@ import { createFolder, listFolders } from '../../electron/domain/folders'
 import { counts, listPhotos } from '../../electron/domain/photos'
 import { parseSession, serializeSession, type SessionState } from '../../electron/session'
 import { createFileSessionStore } from '../../electron/sessionStore'
-import { importScanned, scanDirectory, type ExifReader } from '../../electron/scanner'
+import { importScanned, scanDirectory } from '../../electron/scanner'
 
 // Session persistence is pure JSON shape logic (parse/serialize) plus a node-only
 // file store; neither imports electron, so the whole contract runs under bare Node.
-
-const fakeReader: ExifReader = { readOrientation: async () => 1 }
 
 describe('session parse/serialize round trip', () => {
   const cases = [
@@ -160,7 +158,7 @@ describe('batch isolation across same relative path imports', () => {
   }
 
   async function importRoot(db: Database, batchId: number, root: string): Promise<void> {
-    const { files } = await scanDirectory(root, fakeReader)
+    const { files } = await scanDirectory(root)
     const info = db
       .prepare('INSERT INTO sources (batch_id, abs_path, last_scan_at) VALUES (?, ?, ?)')
       .run(batchId, root, Date.now())

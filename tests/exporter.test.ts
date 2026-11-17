@@ -8,7 +8,7 @@ import { createBatch } from '../electron/domain/batches'
 import { createFolder } from '../electron/domain/folders'
 import { assignToFolder, moveToTrash } from '../electron/domain/classify'
 import { listPhotos } from '../electron/domain/photos'
-import { importScanned, scanDirectory, type ExifReader } from '../electron/scanner'
+import { importScanned, scanDirectory } from '../electron/scanner'
 import { exportBatch, uniqueDestination } from '../electron/exporter'
 
 // Real-fs suite: the exporter is electron-free (node:fs/path only) and must prove
@@ -16,8 +16,6 @@ import { exportBatch, uniqueDestination } from '../electron/exporter'
 
 const dirs: string[] = []
 const handles: Database[] = []
-
-const fakeReader: ExifReader = { readOrientation: async () => 1 }
 
 afterEach(() => {
   while (handles.length) {
@@ -91,7 +89,7 @@ function makeFixtureTree(): Fixture {
 }
 
 async function importFixture(db: Database, batchId: number, root: string): Promise<number[]> {
-  const { files } = await scanDirectory(root, fakeReader)
+  const { files } = await scanDirectory(root)
   const info = db
     .prepare('INSERT INTO sources (batch_id, abs_path, last_scan_at) VALUES (?, ?, ?)')
     .run(batchId, root, Date.now())

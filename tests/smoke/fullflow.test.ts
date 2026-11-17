@@ -23,8 +23,6 @@ import {
   ensureThumbnail,
   type ThumbnailPhoto
 } from '../../electron/media/thumbnails'
-import { ExiftoolReader } from '../../electron/media/rawPreview'
-import { exiftool } from 'exiftool-vendored'
 
 // The real corpus is never created or modified by this suite: every DB, cache and
 // export lands in os.tmpdir(), and the scanner only opens source files read-only.
@@ -109,7 +107,6 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
   let dbFile = ''
   let db: Database
   let batchId = -1
-  let reader: ExiftoolReader
   let thumbDir = ''
   let previewDir = ''
   let exportDir = ''
@@ -124,15 +121,10 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     previewDir = path.join(root, 'previews')
     exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-smoke-export-'))
     dirs.push(exportDir)
-    // Real ExifTool transport: the scan reads orientation from every real file,
-    // and webp files without an Orientation tag fall back to 1.
-    reader = new ExiftoolReader()
     batchId = createBatch(db, 'smoke batch').id
   })
 
   afterAll(async () => {
-    // Shut the stay-open ExifTool process down so no vendor process outlives the run.
-    await exiftool.end()
     if (db?.open) db.close()
     while (dirs.length) {
       fs.rmSync(dirs.pop()!, { recursive: true, force: true })
@@ -144,7 +136,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     const expectedPaths = walkFiles(CORPUS, true).sort()
 
     const tScan0 = performance.now()
-    const scan = await scanDirectory(CORPUS, reader)
+    const scan = await scanDirectory(CORPUS)
     const scanMs = performance.now() - tScan0
     scanned = scan.files
 
@@ -163,7 +155,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     const importMs = performance.now() - tImport0
     // eslint-disable-next-line no-console
     console.log(
-      `[smoke] scan+exiftool ${round1(scanMs)}ms (${scanned.length} files), ` +
+      `[smoke] fs scan ${round1(scanMs)}ms (${scanned.length} files), ` +
         `first importScanned ${round1(importMs)}ms`
     )
 
