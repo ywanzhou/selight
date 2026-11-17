@@ -11,11 +11,11 @@
 
 ## 中优先
 
-5. **I5 照片宽高入库**：exiftool read() 已返回 ImageWidth/ImageHeight，扫描期写入 photos.width/height，补全 spec §4.3 信息条的尺寸项（当前该条件恒假）。
+5. **I5 照片宽高入库**：exiftool read() 已返回 ImageWidth/ImageHeight，扫描期写入 photos.width/height，补全 spec §4.3 信息条的尺寸项（当前该条件恒假）。**（2026-11-17 二期完成：EnrichmentService 富化写入展示态宽高（6/8 交换），MetaBar 条件已生效。）**
 6. **I7 占位缩略图重试**：提供"重试生成"动作（删 `<id>.jpg`+sidecar 后重新 enqueue），并顺手把 sidecar 写序调整为"先 marker 后图、先删 marker 后 rename"。**（2026-11-17 三期完成：`retryMedia(id, kind)` IPC 经 `retryMediaGeneration` 删缓存+sidecar 后重新入对应队列，PreviewPane 失败态提供重试按钮，缩略图与预览同函数覆盖。）**
 7. **exiftool 扫描耗时优化**：现状 52.2s/1874（stay-open 单例串行 read 往返，后台不阻塞 UI）。webp 可免 exiftool（Blink imageOrientation:'from-image' 自带方向），jpg 仍需；优化后预期降幅明显。**（2026-11-17 二期完成并关闭：直读格式统一走 sharp.metadata 读方向与尺寸，exiftool 只服务 RAW；fs-only 发现 + EnrichmentService 有界并发池，实测见高优先 #1 二期条目。）**
 8. **IPC 错误通知组件**：统一 window.alert/confirm 为 macOS 风格通知；错误原文直显改中文映射（FolderNameConflictError 等已有分支）。
-9. **缓存 GC**：missing 占位死产物、长期失效缓存的清理策略。
+9. **缓存 GC**：missing 占位死产物、长期失效缓存的清理策略。**（2026-11-17 四期完成：`planCacheCleanup` 纯函数只读选出孤儿 id、missing=1 死产物、孤立 sidecar（严格限定缓存根内数字命名文件），`runCacheCleanup` 执行并计数，`cleanupMediaCache` IPC + 工具栏手动入口，源文件零触碰。）**
 
 ## 低优先 / 整洁度
 
