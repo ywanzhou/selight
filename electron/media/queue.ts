@@ -27,10 +27,17 @@ export class MediaQueue {
     if (added) this.pump()
   }
 
-  // splice (not unshift) so the given relative order survives at the front.
+  // Active ids are left running; ids already waiting are re-ranked to the
+  // front so viewport signals can overtake bulk work, then fresh ids join the
+  // front in input order.
   prioritize(ids: number[]): void {
-    const fresh = ids.filter((id) => !this.isKnown(id))
-    if (fresh.length > 0) this.queued.splice(0, 0, ...fresh)
+    const movable = ids.filter((id) => !this.active.has(id))
+    if (movable.length === 0) return
+    for (const id of movable) {
+      const index = this.queued.indexOf(id)
+      if (index >= 0) this.queued.splice(index, 1)
+    }
+    this.queued.unshift(...movable)
     this.pump()
   }
 
