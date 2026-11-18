@@ -276,8 +276,9 @@ function bootstrap(): void {
   ipcMain.handle(
     IPC_CHANNELS.dialogPickExportFile,
     async (_event, suggestedName: string) => {
-      // The renderer proposes a name from the batch title; sanitize again because
-      // the user can rename inside the dialog. The directory part is left untouched.
+      // Sanitize the renderer-proposed name before the dialog opens (batch titles
+      // may contain '/', '?' etc.). A name the user types afterwards is validated by
+      // the native save dialog itself, which rejects illegal file-name characters.
       const defaultPath = safeFileName(suggestedName)
       const options: SaveDialogOptions = {
         title: '导出分类清单',

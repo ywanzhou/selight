@@ -61,6 +61,20 @@ export function toPosix(p: string): string {
   return p.split(path.sep).join('/')
 }
 
+/**
+ * Posix path of a photo relative to its source root. Fail loud when the photo
+ * escapes the root (a '../' segment or an absolute cross-drive relative result):
+ * such an entry would send the retriever's script nowhere, and it can only come
+ * from broken referential data, not the normal discovery chain.
+ */
+export function relativeManifestPath(sourceRoot: string, absPath: string): string {
+  const rel = path.relative(sourceRoot, absPath)
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`photo path escapes its source root: ${absPath} not under ${sourceRoot}`)
+  }
+  return toPosix(rel)
+}
+
 /** Make a string safe to use as a save-dialog file name (basename only, callers keep the dir). */
 export function safeFileName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim()
@@ -105,7 +119,8 @@ export function buildManifest(
         }
         return {
           sourceId: photo.sourceId,
-          path: toPosix(path.relative(root, photo.absPath)),
+          // Throws when the photo sits outside its source root.
+          path: relativeManifestPath(root, photo.absPath),
           absPath: toPosix(photo.absPath),
           filename: photo.filename,
           sizeBytes: photo.sizeBytes,
