@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type DragEvent } from 'react'
+import { useCallback, useState, type DragEvent } from 'react'
 import type { PhotoRow } from '../../electron/shared/api'
 import { useMediaUrl } from '../hooks/useMediaUrl'
 import { useAppStore } from '../state/store'
@@ -13,17 +13,17 @@ function formatSize(sizeBytes: number): string {
 
 // Always invokes the media hook (rules of hooks); the missing flag or a failed
 // load replaces the image with an explicit state instead of breaking the hook.
+//
+// The parent remounts this per photo via key={photo.id}, so loaded/loadFailed
+// start false on every photo switch. A mount-scoped reset effect must NOT be
+// used here: when navigating back to a cached photo the <img> onLoad (which
+// sets loaded=true) can fire before the passive effect runs, and the effect's
+// setLoaded(false) would then overwrite it with no second onLoad ever coming,
+// pinning the preview on the loading spinner forever.
 function StageImage({ photo }: { photo: PhotoRow }) {
   const src = useMediaUrl(photo.id, 'photo')
   const [loaded, setLoaded] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
-
-  // A new URL (initial load or a media-ready nonce bump) restarts the settled
-  // state so a stale failure cannot mask a regenerated preview.
-  useEffect(() => {
-    setLoaded(false)
-    setLoadFailed(false)
-  }, [src])
 
   const state = derivePreviewState({
     missing: photo.missing === 1,
@@ -124,7 +124,7 @@ export default function PreviewPane() {
       ) : (
         <>
           <div className="preview-stage" draggable onDragStart={handleDragStart}>
-            <StageImage photo={photo} />
+            <StageImage key={photo.id} photo={photo} />
             <button
               type="button"
               className="nav-circle l"
