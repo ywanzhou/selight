@@ -10,6 +10,7 @@ import { createPreviewQueue } from './media/previews'
 import { EnrichmentService } from './media/enrich'
 import { retryMediaGeneration } from './media/retry'
 import { scheduleThumbnailBackfill } from './media/backfill'
+import { resetMediaCacheIfStale } from './media/cacheVersion'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -110,6 +111,9 @@ function bootstrap(): void {
   fs.mkdirSync(thumbDir, { recursive: true })
   fs.mkdirSync(previewDir, { recursive: true })
   const roots = { thumbDir, previewDir }
+  // One-time wipe when the media pipeline version advanced: backfill rebuilds
+  // thumbnails at idle, previews rebuild on demand. Read-only sources are never touched.
+  resetMediaCacheIfStale(roots, userData)
 
   const exifReader = new ExiftoolReader()
   const thumbs = createThumbnailQueue(
