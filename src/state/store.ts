@@ -12,8 +12,8 @@ import type {
   BatchState,
   Counts,
   EnrichProgressEvent,
-  ExportResult,
   FolderRow,
+  ManifestResult,
   ImportResult,
   PhotoRow,
   SelightApi,
@@ -211,17 +211,17 @@ export async function recoveryImport(deps: ThunkDeps): Promise<ImportResult | nu
 }
 
 /**
- * Export the open batch into an already-picked outputDir. The picker stays in the
- * component (the dialog needs the path for 打开输出目录); progress arrives through
- * the onExportProgress push, not the invoke result.
+ * Write the open batch's selight-manifest JSON into the already-picked target file.
+ * The save dialog stays in the component; the result carries the counts the dialog
+ * displays after the write settles.
  */
-export async function exportBatch(
+export async function exportManifest(
   deps: ThunkDeps,
-  outputDir: string
-): Promise<ExportResult | null> {
+  targetPath: string
+): Promise<ManifestResult | null> {
   const { batchId } = deps.getState()
   if (batchId === null) return null
-  return deps.api.exportBatch(batchId, outputDir)
+  return deps.api.exportManifest(batchId, targetPath)
 }
 
 /** First-paint chain; owns its try/catch so a reject becomes the error state. */
@@ -290,7 +290,7 @@ export interface AppStore {
   importDirectory(): Promise<ImportResult | null>
   cancelImport(): Promise<void>
   recoveryImport(): Promise<ImportResult | null>
-  exportBatch(outputDir: string): Promise<ExportResult | null>
+  exportManifest(targetPath: string): Promise<ManifestResult | null>
   cleanupMediaCache(): Promise<{ removed: number }>
 }
 
@@ -357,7 +357,7 @@ export function AppStoreProvider({
     importDirectory: () => importDirectory(deps),
     cancelImport: () => deps.api.cancelImport(),
     recoveryImport: () => recoveryImport(deps),
-    exportBatch: (outputDir) => exportBatch(deps, outputDir),
+    exportManifest: (targetPath) => exportManifest(deps, targetPath),
     cleanupMediaCache: () => deps.api.cleanupMediaCache()
   }
   return createElement(StoreContext.Provider, { value: store }, children)

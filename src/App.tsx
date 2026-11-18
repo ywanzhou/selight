@@ -9,12 +9,20 @@ import { FolderIcon } from './components/icons'
 import { useShortcuts } from './hooks/useShortcuts'
 import { AppStoreProvider, useAppStore } from './state/store'
 import { SelectionProvider } from './state/selectionContext'
-import type { ExportResult } from '../electron/shared/api'
+import type { ManifestResult } from '../electron/shared/api'
 
-// Null = dialog closed; result === null within the object means the copy is still running.
+// Null = dialog closed; result === null within the object means the write is still running.
 interface ExportRun {
-  outputDir: string
-  result: ExportResult | null
+  targetPath: string
+  targetDir: string
+  result: ManifestResult | null
+}
+
+// Local-time yyyymmdd for the suggested manifest file name.
+function dateStamp(d: Date): string {
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}${month}${day}`
 }
 
 function EmptyState() {
@@ -110,7 +118,7 @@ function Workspace({ modalOpen }: { modalOpen: boolean }) {
 }
 
 function Shell() {
-  const { state, exportBatch } = useAppStore()
+  const { state, exportManifest } = useAppStore()
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [exportRun, setExportRun] = useState<ExportRun | null>(null)
 
@@ -121,13 +129,20 @@ function Shell() {
 
   async function handleExport(): Promise<void> {
     if (exportRun !== null) return
-    const outputDir = await window.selight.pickExportDirectory()
-    if (!outputDir) return
-    setExportRun({ outputDir, result: null })
+    const batchName =
+      state.batches.find((b) => b.id === state.batchId)?.name ?? ''
+    const suggested = `择影清单-${batchName}-${dateStamp(new Date())}.json`
+    const targetPath = await window.selight.pickExportFile(suggested)
+    if (!targetPath) return
+    // Renderer has no node:path; split on either separator so Windows and posix
+    // dialog results both resolve to the containing directory for openPath.
+    const split = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'))
+    const targetDir = split > 0 ? targetPath.slice(0, split) : targetPath
+    setExportRun({ targetPath, targetDir, result: null })
     try {
-      const result = await exportBatch(outputDir)
+      const result = await exportManifest(targetPath)
       // A batch switch mid-run resolves to null: just close instead of sticking the dialog.
-      setExportRun(result === null ? null : { outputDir, result })
+      setExportRun(result === null ? null : { targetPath, targetDir, result })
     } catch (e) {
       setExportRun(null)
       window.alert(e instanceof Error ? e.message : String(e))
@@ -149,7 +164,8 @@ function Shell() {
       <RecoveryDialog open={recoveryOpen} onClose={() => setRecoveryOpen(false)} />
       <ExportDialog
         open={exportRun !== null}
-        outputDir={exportRun?.outputDir ?? null}
+        targetPath={exportRun?.targetPath ?? null}
+        targetDir={exportRun?.targetDir ?? null}
         result={exportRun?.result ?? null}
         onClose={() => setExportRun(null)}
       />

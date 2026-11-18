@@ -10,7 +10,7 @@ import {
   boot,
   createBatch,
   deleteBatch,
-  exportBatch,
+  exportManifest,
   importDirectory,
   openBatch,
   recoveryImport,
@@ -48,9 +48,9 @@ const HANDLER_NAMES = [
   'restore',
   'unassign',
   'undo',
-  'exportBatch',
+  'exportManifest',
   'pickDirectory',
-  'pickExportDirectory',
+  'pickExportFile',
   'openPath',
   'getSession',
   'saveSession'
@@ -62,7 +62,6 @@ function makeApi(overrides: Partial<Record<keyof SelightApi, unknown>> = {}): Se
     ReturnType<typeof vi.fn>
   >
   base.onDbRecovered = vi.fn(() => () => {})
-  base.onExportProgress = vi.fn(() => () => {})
   base.onEnrichProgress = vi.fn(() => () => {})
   base.onMediaReady = vi.fn(() => () => {})
   return { ...base, ...overrides } as unknown as SelightApi
@@ -473,24 +472,29 @@ describe('interactive thunks', () => {
     expect(importCall).not.toHaveBeenCalled()
   })
 
-  it('exportBatch is a no-op without an open batch', async () => {
+  it('exportManifest is a no-op without an open batch', async () => {
     const exportCall = vi.fn()
-    const api = makeApi({ exportBatch: exportCall })
+    const api = makeApi({ exportManifest: exportCall })
     const h = harness(api)
 
-    expect(await exportBatch(h.deps, 'E:/out')).toBeNull()
+    expect(await exportManifest(h.deps, 'E:/out/manifest.json')).toBeNull()
     expect(exportCall).not.toHaveBeenCalled()
   })
 
-  it('exportBatch delegates to the bridge with the open batchId and chosen directory', async () => {
-    const result = { copied: 3, failures: [] }
+  it('exportManifest delegates to the bridge with the open batchId and target file', async () => {
+    const result = {
+      targetPath: 'E:/out/manifest.json',
+      folderCount: 2,
+      photoCount: 3,
+      missingCount: 0
+    }
     const exportCall = vi.fn(async () => result)
-    const api = makeApi({ exportBatch: exportCall })
+    const api = makeApi({ exportManifest: exportCall })
     const h = harness(api)
     h.dispatch({ type: 'opened', state: opened })
 
-    expect(await exportBatch(h.deps, 'E:/out')).toBe(result)
-    expect(exportCall).toHaveBeenCalledWith(1, 'E:/out')
+    expect(await exportManifest(h.deps, result.targetPath)).toBe(result)
+    expect(exportCall).toHaveBeenCalledWith(1, result.targetPath)
   })
 
   it('refresh re-pulls the current view, counts and folders in parallel', async () => {

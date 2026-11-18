@@ -38,15 +38,16 @@ const api: SelightApi = {
   unassign: (photoIds) => ipcRenderer.invoke(IPC_CHANNELS.classifyUnassign, photoIds),
   undo: (batchId) => ipcRenderer.invoke(IPC_CHANNELS.classifyUndo, batchId),
 
-  exportBatch: (batchId, outputDir) =>
-    ipcRenderer.invoke(IPC_CHANNELS.exportBatch, batchId, outputDir),
+  exportManifest: (batchId, targetPath) =>
+    ipcRenderer.invoke(IPC_CHANNELS.exportManifest, batchId, targetPath),
 
   getSession: () => ipcRenderer.invoke(IPC_CHANNELS.sessionGet),
   saveSession: (state) => ipcRenderer.invoke(IPC_CHANNELS.sessionSave, state),
 
   // Renderer-only capability: native dialog handled in main, outside the pure factory.
   pickDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.dialogPickDirectory),
-  pickExportDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.dialogPickExportDirectory),
+  pickExportFile: (suggestedName) =>
+    ipcRenderer.invoke(IPC_CHANNELS.dialogPickExportFile, suggestedName),
   openPath: (target) => ipcRenderer.invoke(IPC_CHANNELS.shellOpenPath, target),
 
   // Main→renderer push. The wrapped unsubscribe removes the exact listener instance.
@@ -54,12 +55,6 @@ const api: SelightApi = {
     const listener = () => cb()
     ipcRenderer.on(IPC_CHANNELS.dbRecovered, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.dbRecovered, listener)
-  },
-
-  onExportProgress: (cb) => {
-    const listener = (_event: unknown, payload: { done: number; total: number }) => cb(payload)
-    ipcRenderer.on(IPC_CHANNELS.exportProgress, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.exportProgress, listener)
   },
 
   onEnrichProgress: (cb) => {

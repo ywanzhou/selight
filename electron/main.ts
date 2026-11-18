@@ -1,4 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type OpenDialogOptions,
+  type SaveDialogOptions
+} from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
@@ -15,6 +23,7 @@ import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
 import { createHandlers } from './ipc'
+import { safeFileName } from './manifest'
 import { createFileSessionStore } from './sessionStore'
 import type { SessionStore } from './session'
 import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './shared/api'
@@ -162,10 +171,7 @@ function bootstrap(): void {
         retryMediaGeneration(roots, 'photo', id, { thumb: thumbs, photo: previews })
     },
     mediaRoots: roots,
-    sessionStore,
-    onExportProgress: (done, total) => {
-      mainWindow?.webContents.send(IPC_CHANNELS.exportProgress, { done, total })
-    }
+    sessionStore
   })
 
   ipcMain.handle(IPC_CHANNELS.batchList, () => handlers.listBatches())
@@ -242,13 +248,13 @@ function bootstrap(): void {
     handlers.undo(batchId)
   )
 
-  // Remember the resolved root here too, so openPath stays scoped even if a future
-  // caller starts an export without going through the picker.
+  // Remember the target file's directory here too, so openPath stays scoped even
+  // if a future caller starts an export without going through the save dialog.
   ipcMain.handle(
-    IPC_CHANNELS.exportBatch,
-    async (_event, batchId: number, outputDir: string) => {
-      lastExportDir = path.resolve(outputDir)
-      return handlers.exportBatch(batchId, outputDir)
+    IPC_CHANNELS.exportManifest,
+    async (_event, batchId: number, targetPath: string) => {
+      lastExportDir = path.dirname(path.resolve(targetPath))
+      return handlers.exportManifest(batchId, targetPath)
     }
   )
 
@@ -267,19 +273,29 @@ function bootstrap(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
-  ipcMain.handle(IPC_CHANNELS.dialogPickExportDirectory, async () => {
-    const options: OpenDialogOptions = {
-      title: '选择导出目录',
-      properties: ['openDirectory', 'createDirectory']
+  ipcMain.handle(
+    IPC_CHANNELS.dialogPickExportFile,
+    async (_event, suggestedName: string) => {
+      // The renderer proposes a name from the batch title; sanitize again because
+      // the user can rename inside the dialog. The directory part is left untouched.
+      const defaultPath = safeFileName(suggestedName)
+      const options: SaveDialogOptions = {
+        title: '导出分类清单',
+        defaultPath,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      }
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || result.filePath === undefined) return null
+      // Electron does not append the filter extension automatically on every platform.
+      const resolved = /\.json$/i.test(result.filePath)
+        ? result.filePath
+        : `${result.filePath}.json`
+      lastExportDir = path.dirname(path.resolve(resolved))
+      return resolved
     }
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options)
-    if (result.canceled) return null
-    const picked = result.filePaths[0] ?? null
-    if (picked !== null) lastExportDir = path.resolve(picked)
-    return picked
-  })
+  )
 
   // Containment check: rel === '' is the root itself (打开输出目录); anything containing
   // '..' or resolving to another drive escapes the chosen export directory and is refused.
