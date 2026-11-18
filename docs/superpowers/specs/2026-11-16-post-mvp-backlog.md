@@ -4,10 +4,10 @@
 
 ## 高优先（第二批，小改动高回报）
 
-1. **I3 单实例锁 + busy_timeout**：加 `app.requestSingleInstanceLock()` 与 `PRAGMA busy_timeout=5000`，防双实例 SQLITE_BUSY 与缓存 .tmp 竞争。
-2. **I2 键盘导航滚动跟随**：react-window Grid ref 接 `scrollToItem`，方向键/分配后锚点保持在视口内（键盘过快片是核心工作流）。
-3. **I4 文件夹名领域校验**：领域层加 `FolderNameInvalidError`（拒绝 `? * | < > " / \`、CON/NUL 保留名、`.`/`..`），InlineNameInput 前置中文提示；当前导出侧 containment 已封死安全面，代价是非法名文件夹必然导出失败。
-4. **I6 assignToFolder 归属断言**：校验 folderId 属于当前批次且未软删，与 IPC 边界运行时参数校验同一轮做。
+1. **I3 单实例锁 + busy_timeout**：加 `app.requestSingleInstanceLock()` 与 `PRAGMA busy_timeout=5000`，防双实例 SQLITE_BUSY 与缓存 .tmp 竞争。**（2026-11-18 完成：main.ts 启动前取单实例锁，拿不到即 quit，second-instance 聚焦现有窗口；schema init 显式 `busy_timeout=5000` PRAGMA 不依赖驱动默认。）**
+2. **I2 键盘导航滚动跟随**：react-window Grid ref 接 `scrollToItem`，方向键/分配后锚点保持在视口内（键盘过快片是核心工作流）。**（2026-11-18 完成：纯函数 `anchorRowIndex` 映射平面索引到网格行，ThumbPane 经 react-window v2 gridRef/scrollToCell smart 对齐，anchor 变化即跟随。）**
+3. **I4 文件夹名领域校验**：领域层加 `FolderNameInvalidError`（拒绝 `? * | < > " / \`、CON/NUL 保留名、`.`/`..`），InlineNameInput 前置中文提示；当前导出侧 containment 已封死安全面，代价是非法名文件夹必然导出失败。**（2026-11-18 完成：`validateFolderName` 纯函数 + `FolderNameInvalidError`，createFolder/renameFolder 事务入口校验，表驱动测试覆盖；统一中文通知映射仍是 #8。导出 containment 测试改裸 SQL 造污染行保持防线覆盖。）**
+4. **I6 assignToFolder 归属断言**：校验 folderId 属于当前批次且未软删，与 IPC 边界运行时参数校验同一轮做。**（2026-11-18 完成：applyActions 事务内校验目标 folder 存在、deleted_at 为空、batch_id 与照片同批，违例抛 FolderNotFoundError 并回滚，无状态/审计写入。）**
 
 ## 中优先
 
