@@ -63,11 +63,13 @@ export class ExiftoolReader implements ExifReader {
   }
 
   async extractPreview(absPath: string): Promise<Buffer> {
+    // PreviewImage is the camera's full embedded preview (1616x1080 on Sony A7 III);
+    // ThumbnailImage is only a 160x120 index thumbnail and must stay the fallback.
     try {
-      return await this.exif.extractBinaryTagToBuffer('ThumbnailImage', absPath)
+      return await this.exif.extractBinaryTagToBuffer('PreviewImage', absPath)
     } catch {
       try {
-        return await this.exif.extractBinaryTagToBuffer('PreviewImage', absPath)
+        return await this.exif.extractBinaryTagToBuffer('ThumbnailImage', absPath)
       } catch (cause) {
         throw new RawPreviewError(`No embedded preview found in ${absPath}`, { cause })
       }
