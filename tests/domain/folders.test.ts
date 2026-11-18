@@ -7,10 +7,12 @@ import { openDatabase } from '../../electron/db/schema'
 import { createBatch } from '../../electron/domain/batches'
 import {
   FolderNameConflictError,
+  FolderNameInvalidError,
   createFolder,
   listFolders,
   renameFolder,
-  softDeleteFolder
+  softDeleteFolder,
+  validateFolderName
 } from '../../electron/domain/folders'
 
 const dirs: string[] = []
@@ -34,7 +36,56 @@ afterEach(() => {
   }
 })
 
+describe('validateFolderName', () => {
+  const invalid: Array<[string, string]> = [
+    ['empty string', ''],
+    ['whitespace only', '   '],
+    ['question mark', '婚礼?'],
+    ['asterisk', 'a*b'],
+    ['pipe', 'a|b'],
+    ['angle brackets', '<精选>'],
+    ['double quote', 'say "hi"'],
+    ['slash', 'a/b'],
+    ['backslash', 'a\\b'],
+    ['dot', '.'],
+    ['double dot', '..'],
+    ['reserved CON', 'CON'],
+    ['reserved NUL lowercase', 'nul'],
+    ['reserved COM1 with extension', 'com1.txt'],
+    ['reserved LPT9', 'LPT9']
+  ]
+  for (const [label, name] of invalid) {
+    it(`rejects ${label}`, () => {
+      expect(validateFolderName(name)).not.toBeNull()
+    })
+  }
+
+  const valid = ['合影', '精选 2026', 'wedding', 'a.b.c', '名·称', 'CON 合影', 'folder-1']
+  for (const name of valid) {
+    it(`accepts ${name}`, () => {
+      expect(validateFolderName(name)).toBeNull()
+    })
+  }
+
+  it('trims surrounding whitespace before checking emptiness but keeps the inner name', () => {
+    expect(validateFolderName('  合影  ')).toBeNull()
+    expect(validateFolderName(' ')).not.toBeNull()
+  })
+})
+
 describe('folder domain module', () => {
+  it('createFolder and renameFolder reject invalid names with FolderNameInvalidError', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    expect(() => createFolder(db, batch.id, 'a/b')).toThrowError(FolderNameInvalidError)
+    expect(() => createFolder(db, batch.id, 'NUL')).toThrowError(FolderNameInvalidError)
+
+    const folder = createFolder(db, batch.id, '正常')
+    expect(() => renameFolder(db, folder.id, '..')).toThrowError(FolderNameInvalidError)
+    // A failed validation leaves no rows behind and does not touch the existing folder.
+    expect(listFolders(db, batch.id).map((f) => f.name)).toEqual(['正常'])
+  })
+
   it('createFolder starts sortOrder at 1 and increments per batch', () => {
     const db = tempDb()
     const batch = createBatch(db)

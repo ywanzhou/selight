@@ -27,6 +27,47 @@ export class FolderNameConflictError extends Error {
   }
 }
 
+export class FolderNameInvalidError extends Error {
+  constructor(name: string, reason: string) {
+    super(`invalid folder name "${name}": ${reason}`)
+    this.name = 'FolderNameInvalidError'
+  }
+}
+
+// Windows device names that cannot name a filesystem entry, case-insensitive,
+// including the "<name>.<ext>" form (CON.txt still resolves to the device).
+const RESERVED_NAMES = new Set([
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)
+])
+const FORBIDDEN_CHARS = /[?*|<>"\/\\]/
+
+/**
+ * Domain folder-name rule. Returns null when the name is usable, otherwise an
+ * English reason string; callers map it to localized UI text. Trims whitespace
+ * so the stored name and the validation see the same value.
+ */
+export function validateFolderName(rawName: string): string | null {
+  const name = rawName.trim()
+  if (name === '') return 'folder name must not be empty'
+  if (name === '.' || name === '..') return 'dot names are reserved'
+  if (FORBIDDEN_CHARS.test(name)) {
+    return 'folder name contains a forbidden character (? * | < > " / \\)'
+  }
+  const base = name.split('.')[0].toUpperCase()
+  if (RESERVED_NAMES.has(base)) return 'reserved Windows device name'
+  return null
+}
+
+function assertValidFolderName(name: string): void {
+  const reason = validateFolderName(name)
+  if (reason !== null) throw new FolderNameInvalidError(name, reason)
+}
+
 function mapRow(row: FolderSnake): FolderRow {
   return {
     id: row.id,
@@ -47,6 +88,7 @@ function getFolder(db: Database, id: number): FolderRow {
 
 export function createFolder(db: Database, batchId: number, name: string): FolderRow {
   const insert = db.transaction((): number => {
+    assertValidFolderName(name)
     const conflict = db
       .prepare(
         'SELECT 1 FROM folders WHERE batch_id = ? AND name = ? AND deleted_at IS NULL'
@@ -71,6 +113,7 @@ export function createFolder(db: Database, batchId: number, name: string): Folde
 
 export function renameFolder(db: Database, id: number, name: string): void {
   db.transaction(() => {
+    assertValidFolderName(name)
     const conflict = db
       .prepare(
         'SELECT 1 FROM folders WHERE batch_id = (SELECT batch_id FROM folders WHERE id = ?) AND name = ? AND deleted_at IS NULL AND id != ?'
