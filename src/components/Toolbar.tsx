@@ -37,7 +37,7 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
   }
 
   const total = counts?.total ?? 0
-  // Export only copies status='folder' photos; zero of them means an empty output.
+  // The manifest only includes status='folder' photos; zero of them means an empty export.
   const nothingToExport = (counts?.folder ?? 0) === 0
 
   async function handleDeleteBatch(): Promise<void> {

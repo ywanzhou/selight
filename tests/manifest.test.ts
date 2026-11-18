@@ -10,6 +10,7 @@ import { upsertPhoto, type PhotoInput } from '../electron/domain/photos'
 import {
   buildManifest,
   exportManifest,
+  relativeManifestPath,
   safeFileName,
   toPosix,
   writeManifest,
@@ -83,6 +84,20 @@ describe('toPosix', () => {
 
   it('leaves posix paths untouched', () => {
     expect(toPosix('a/b/c.ARW')).toBe('a/b/c.ARW')
+  })
+})
+
+describe('relativeManifestPath', () => {
+  it('returns the posix path of a photo below its source root', () => {
+    const root = path.join(os.tmpdir(), 'selight-manifest-root')
+    const photo = path.join(root, 'sub', 'a.ARW')
+    expect(relativeManifestPath(root, photo)).toBe('sub/a.ARW')
+  })
+
+  it('throws when the photo resolves outside the source root', () => {
+    const root = path.join(os.tmpdir(), 'selight-manifest-root-in')
+    const outside = path.join(os.tmpdir(), 'selight-manifest-root-out', 'a.jpg')
+    expect(() => relativeManifestPath(root, outside)).toThrow()
   })
 })
 
@@ -196,6 +211,17 @@ describe('buildManifest', () => {
     )
     expect(flags.get('a.jpg')).toBe(false)
     expect(flags.get('b.jpg')).toBe(true)
+  })
+
+  it('fails loudly instead of emitting a path that escapes the source root', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const source = addSource(db, batch.id, 'E:/wedding')
+    const folder = createFolder(db, batch.id, '精选')
+    const rogue = makePhoto(db, batch.id, source, 'E:/other-place/a.jpg')
+    assignToFolder(db, rogue, folder.id)
+
+    expect(() => buildManifest(db, batch.id, NOW)).toThrow()
   })
 })
 

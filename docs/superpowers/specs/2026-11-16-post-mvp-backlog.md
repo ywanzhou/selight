@@ -34,6 +34,9 @@
 - 文件夹名校验范围说明：仅枚举 COM/LPT 1–9 与 CON/PRN/AUX/NUL，COM0/LPT0、更高编号与 ASCII 控制字符未列名拒绝，由导出 mkdir 失败清单兜底。
 - **弹层焦点陷阱（2026-11-18 工具栏重构评审登记，即上文渲染层条目「右键菜单 focus trap」的完整版）**：BatchPicker 与 FolderContextMenu 同构——打开期间在 window capture 阶段对全部键 `stopPropagation`，Tab 未被拦截所以焦点能移出弹层，但弹层不关闭、capture 监听仍在，用户 Tab 回缩略图网格后按数字键分类会被静默吞掉，直到 Esc 或外部点击。修法：加 `focusout` 关闭（带 `relatedTarget` 仍在根节点内的守卫，避免选项间移焦误关），两个组件同一轮改。
 - **批次选择器首字母跳转（2026-11-18 工具栏重构评审登记）**：原生 `<select>` 自带的 type-ahead（敲首字母跳到对应选项）在自定义 BatchPicker 改造中丢失，现仅支持 ↑/↓/Enter/Esc。批次按 lastOpened 排序且通常不多，影响有限；补回时把按键匹配逻辑写成 `state/batchPicker.ts` 的 DOM-free 纯函数（输入串 + 批次名列表 → 目标下标），随表驱动测试一起进。
+- **导出清单盘根路径边界（2026-11-18 导出清单评审登记，m1）**：`App.tsx` 手算 dirname 在目标为盘根（如 `D:\manifest.json`）时得到 `"D:"` 而非 `D:\`，点「打开所在目录」可能落到进程 cwd；main 侧 `lastExportDir` 用真 `path.dirname` 推导，openPath containment 守卫不会被绕过，正常多级路径不触发。修法：盘根正则保留尾分隔符，或让 openPath 改由 main 侧自行 dirname，渲染层不再手搓路径。
+- **manifest 写盘失败残留 .tmp（2026-11-18 导出清单评审登记，m3）**：`writeManifest` 遇 ENOSPC/进程被杀会留下半截 `manifest.json.tmp`；重试时 writeFile 截断覆盖可自愈，与 sessionStore 是同一已接受模式。可选增强：catch 里 `fs.rm(tmp, {force:true})` 后 rethrow。
+- **导出弹窗无 aria 播报（2026-11-18 导出清单评审登记，m6）**：ExportDialog 写入态 spinner 是 `aria-hidden`，读屏无法感知开始/完成（旧版有 `role="progressbar"`）；弹窗也无 autofocus，与 RecoveryDialog 同水平非回归。随中优先 #8 通知/弹窗体系一并处理。
 
 ## 发行前必做
 
