@@ -115,29 +115,29 @@ describe('ExiftoolReader.readImageMeta', () => {
 })
 
 describe('ExiftoolReader.extractPreview', () => {
-  it('prefers ThumbnailImage and never touches PreviewImage', async () => {
-    const thumb = tinyJpeg()
-    const preview = Buffer.from([1, 2, 3])
+  it('prefers the full-size PreviewImage and never touches ThumbnailImage', async () => {
+    const thumb = Buffer.from([1, 2, 3])
+    const preview = tinyJpeg()
     const fake = makeFake({ thumbnail: thumb, preview })
     const reader = new ExiftoolReader({
       read: fake.read,
       extractBinaryTagToBuffer: fake.extract
     })
-    await expect(reader.extractPreview('x.arw')).resolves.toBe(thumb)
+    await expect(reader.extractPreview('x.arw')).resolves.toBe(preview)
     expect(fake.extract).toHaveBeenCalledTimes(1)
-    expect(fake.extract).toHaveBeenCalledWith('ThumbnailImage', 'x.arw')
+    expect(fake.extract).toHaveBeenCalledWith('PreviewImage', 'x.arw')
   })
 
-  it('falls back to PreviewImage when no thumbnail exists', async () => {
-    const preview = tinyJpeg()
-    const fake = makeFake({ preview })
+  it('falls back to ThumbnailImage when no PreviewImage exists', async () => {
+    const thumb = tinyJpeg()
+    const fake = makeFake({ thumbnail: thumb })
     const reader = new ExiftoolReader({
       read: fake.read,
       extractBinaryTagToBuffer: fake.extract
     })
-    await expect(reader.extractPreview('x.arw')).resolves.toBe(preview)
+    await expect(reader.extractPreview('x.arw')).resolves.toBe(thumb)
     expect(fake.extract).toHaveBeenCalledTimes(2)
-    expect(fake.extract).toHaveBeenLastCalledWith('PreviewImage', 'x.arw')
+    expect(fake.extract).toHaveBeenLastCalledWith('ThumbnailImage', 'x.arw')
   })
 
   it('throws RawPreviewError when neither embedded image exists', async () => {
@@ -165,7 +165,7 @@ describe('ExiftoolReader.ensureRawPreview', () => {
     })
       .jpeg()
       .toBuffer()
-    const fake = makeFake({ orientation: 6, thumbnail: () => source })
+    const fake = makeFake({ orientation: 6, preview: () => source })
     const reader = new ExiftoolReader({
       read: fake.read,
       extractBinaryTagToBuffer: fake.extract
@@ -207,7 +207,7 @@ describe('ExiftoolReader.ensureRawPreview', () => {
     })
       .jpeg()
       .toBuffer()
-    const fake = makeFake({ orientation: 1, thumbnail: () => source })
+    const fake = makeFake({ orientation: 1, preview: () => source })
     const reader = new ExiftoolReader({
       read: fake.read,
       extractBinaryTagToBuffer: fake.extract

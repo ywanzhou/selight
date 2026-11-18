@@ -10,6 +10,7 @@ import { createPreviewQueue } from './media/previews'
 import { EnrichmentService } from './media/enrich'
 import { retryMediaGeneration } from './media/retry'
 import { scheduleThumbnailBackfill } from './media/backfill'
+import { resetMediaCacheIfStale } from './media/cacheVersion'
 import type { MediaQueue } from './media/queue'
 // Side-effect import: registers the selight scheme as privileged before app ready.
 import { registerMediaProtocol } from './media/protocol'
@@ -17,6 +18,16 @@ import { createHandlers } from './ipc'
 import { createFileSessionStore } from './sessionStore'
 import type { SessionStore } from './session'
 import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './shared/api'
+
+// Corporate DLP agents (OCular/IP-guard class) both inject into Chromium sandbox
+// children and block the unsigned electron.exe from writing %APPDATA% (0x5). On dev
+// machines that opt in via ELECTRON_DISABLE_SANDBOX, keep userData in the project so
+// the singleton lock, SQLite WAL and caches land on an unmonitored drive. Must run
+// before requestSingleInstanceLock, whose lock file lives in userData. Packaged builds
+// and machines without the env var keep the default per-user location.
+if (!app.isPackaged && process.env['ELECTRON_DISABLE_SANDBOX'] === '1') {
+  app.setPath('userData', path.resolve(__dirname, '../../.dev-userdata'))
+}
 
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
@@ -100,6 +111,9 @@ function bootstrap(): void {
   fs.mkdirSync(thumbDir, { recursive: true })
   fs.mkdirSync(previewDir, { recursive: true })
   const roots = { thumbDir, previewDir }
+  // One-time wipe when the media pipeline version advanced: backfill rebuilds
+  // thumbnails at idle, previews rebuild on demand. Read-only sources are never touched.
+  resetMediaCacheIfStale(roots, userData)
 
   const exifReader = new ExiftoolReader()
   const thumbs = createThumbnailQueue(
