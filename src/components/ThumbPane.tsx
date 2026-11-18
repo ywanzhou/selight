@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
-import { Grid } from 'react-window'
+import { Grid, useGridRef } from 'react-window'
 import type { PhotoRow, View } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
 import { useSelectionContext } from '../state/selectionContext'
 import { DROP_MIME } from '../state/drop'
-import { cellWidth } from '../state/gridGeometry'
+import { anchorRowIndex, cellWidth } from '../state/gridGeometry'
 import GridCell, { type ThumbCellData } from './ThumbCell'
 import { ChevronLeftIcon } from './icons'
 
@@ -48,6 +48,8 @@ export default function ThumbPane() {
   const { batchId, view, photos, folders } = state
 
   const wrapRef = useRef<HTMLDivElement>(null)
+  // react-window v2 imperative API via the gridRef prop (not a React ref).
+  const gridRef = useGridRef(null)
   const [cellW, setCellW] = useState(FALLBACK_CELL_W)
   const hasGrid = photos.length > 0
 
@@ -90,6 +92,18 @@ export default function ThumbPane() {
       cancelAnimationFrame(raf)
     }
   }, [hasGrid, gridKey])
+
+  // Keyboard follow: keep the anchored photo inside the visible grid when
+  // arrow keys / number-key actions move it beyond the current scroll range.
+  // gridKey resets scroll on view/batch switch, and anchor null skips work.
+  const orderedIds = selection.orderedIds
+  useEffect(() => {
+    if (anchor === null || !hasGrid) return
+    const flatIndex = orderedIds.indexOf(anchor)
+    const rowIndex = anchorRowIndex(flatIndex, COLUMN_COUNT)
+    if (rowIndex === null) return
+    gridRef.current?.scrollToCell({ rowIndex, columnIndex: 0, rowAlign: 'smart' })
+  }, [anchor, gridKey, hasGrid, orderedIds])
 
   // Best-effort thumbnail preheat: tell the main-process queue which rendered
   // ids matter now. Dedupe identical ranges so steady scrolling stays quiet.
@@ -231,6 +245,7 @@ export default function ThumbPane() {
         >
           <Grid<ThumbCellData>
             key={gridKey}
+            gridRef={gridRef}
             cellComponent={GridCell}
             cellProps={cellProps}
             columnCount={COLUMN_COUNT}

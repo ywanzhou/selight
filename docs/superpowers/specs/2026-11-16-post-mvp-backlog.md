@@ -4,10 +4,10 @@
 
 ## 高优先（第二批，小改动高回报）
 
-1. **I3 单实例锁 + busy_timeout**：加 `app.requestSingleInstanceLock()` 与 `PRAGMA busy_timeout=5000`，防双实例 SQLITE_BUSY 与缓存 .tmp 竞争。
-2. **I2 键盘导航滚动跟随**：react-window Grid ref 接 `scrollToItem`，方向键/分配后锚点保持在视口内（键盘过快片是核心工作流）。
-3. **I4 文件夹名领域校验**：领域层加 `FolderNameInvalidError`（拒绝 `? * | < > " / \`、CON/NUL 保留名、`.`/`..`），InlineNameInput 前置中文提示；当前导出侧 containment 已封死安全面，代价是非法名文件夹必然导出失败。
-4. **I6 assignToFolder 归属断言**：校验 folderId 属于当前批次且未软删，与 IPC 边界运行时参数校验同一轮做。
+1. **I3 单实例锁 + busy_timeout**：加 `app.requestSingleInstanceLock()` 与 `PRAGMA busy_timeout=5000`，防双实例 SQLITE_BUSY 与缓存 .tmp 竞争。**（2026-11-18 完成：main.ts 启动前取单实例锁，拿不到即 quit，second-instance 聚焦现有窗口；schema init 显式 `busy_timeout=5000` PRAGMA 不依赖驱动默认。）**
+2. **I2 键盘导航滚动跟随**：react-window Grid ref 接 `scrollToItem`，方向键/分配后锚点保持在视口内（键盘过快片是核心工作流）。**（2026-11-18 完成：纯函数 `anchorRowIndex` 映射平面索引到网格行，ThumbPane 经 react-window v2 gridRef/scrollToCell smart 对齐，anchor 变化即跟随。）**
+3. **I4 文件夹名领域校验**：领域层加 `FolderNameInvalidError`（拒绝 `? * | < > " / \`、CON/NUL 保留名、`.`/`..`），InlineNameInput 前置中文提示；当前导出侧 containment 已封死安全面，代价是非法名文件夹必然导出失败。**（2026-11-18 完成：`validateFolderName` 纯函数 + `FolderNameInvalidError`，createFolder/renameFolder 事务入口校验，表驱动测试覆盖；统一中文通知映射仍是 #8。导出 containment 测试改裸 SQL 造污染行保持防线覆盖。）**
+4. **I6 assignToFolder 归属断言**：校验 folderId 属于当前批次且未软删，与 IPC 边界运行时参数校验同一轮做。**（2026-11-18 完成：applyActions 事务内校验目标 folder 存在、deleted_at 为空、batch_id 与照片同批，违例抛 FolderNotFoundError 并回滚，无状态/审计写入。）**
 
 ## 中优先
 
@@ -28,6 +28,9 @@
 - 预览尺寸互换断言随 samples/ 激活自动闭环（harness 已写好）。
 - **cancelImport 作用域（2026-11-17 四期评审登记）**：取消是进程级 EnrichmentService.cancel，导入期间若用户切批次，openBatch 的补偿提交会被一并清掉。无数据错误（下次打开批次重新补偿），但与"只取消本次导入"的直觉有偏差；后续可给导入期间的批次下拉加禁用，或给 cancel 加 scan 关联作用域。
 - 富化进度计数在 in-flight 任务 settle 于 cancel 之后时可能产生瞬时 done>total 事件（仅工具栏展示影响，下一事件即纠正）；需要严格单调时改为 cancel 时忽略被清任务的 settle。
+- **单实例锁 macOS 边界（2026-11-18 评审登记）**：window-all-closed 后 mac 上 app 保活但 mainWindow=null，此时 second-instance 提前 return 不建窗，要等 dock activate 才恢复；mac 适配轮处理。
+- **legacy 非法名文件夹重命名（2026-11-18 评审登记）**：历史行若含现规则下非法的名字，rename 到自身会抛 FolderNameInvalidError，必须改成新名才能关闭对话框；无数据风险，#8 做中文错误映射时一并优化提示。
+- 文件夹名校验范围说明：仅枚举 COM/LPT 1–9 与 CON/PRN/AUX/NUL，COM0/LPT0、更高编号与 ASCII 控制字符未列名拒绝，由导出 mkdir 失败清单兜底。
 
 ## 发行前必做
 

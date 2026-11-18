@@ -59,6 +59,20 @@ function tempDb(): Database {
   return db
 }
 
+// Bypass domain validation to simulate corrupted/legacy rows: the export
+// containment layer must still defend against names the domain now rejects.
+function insertFolderRow(db: Database, batchId: number, name: string): number {
+  const max = (
+    db
+      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM folders WHERE batch_id = ?')
+      .get(batchId) as { m: number }
+  ).m
+  const info = db
+    .prepare('INSERT INTO folders (batch_id, name, sort_order) VALUES (?, ?, ?)')
+    .run(batchId, name, max + 1)
+  return Number(info.lastInsertRowid)
+}
+
 function writeFile(dir: string, name: string, contents: string): string {
   const p = path.join(dir, name)
   fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -292,7 +306,7 @@ describe('exportBatch', () => {
     const db = tempDb()
     const batch = createBatch(db)
     // Stored verbatim: the domain layer intentionally does not sanitize folder names.
-    const evil = createFolder(db, batch.id, path.join('..', '..', 'evil-export'))
+    const evil = { id: insertFolderRow(db, batch.id, path.join('..', '..', 'evil-export')) }
     const pick = createFolder(db, batch.id, '精选')
     const fixture = makeFixtureTree()
     await importFixture(db, batch.id, fixture.root)
@@ -331,7 +345,7 @@ describe('exportBatch', () => {
   it('rejects a folder literally named ".." without mkdir outside the output tree', async () => {
     const db = tempDb()
     const batch = createBatch(db)
-    const dotdot = createFolder(db, batch.id, '..')
+    const dotdot = { id: insertFolderRow(db, batch.id, '..') }
     const fixture = makeFixtureTree()
     await importFixture(db, batch.id, fixture.root)
     const topA = listPhotos(db, batch.id, { kind: 'inbox' }).find(
@@ -360,7 +374,7 @@ describe('exportBatch', () => {
     // '?' is legal inside SQLite but an NTFS-illegal path character; createFolder
     // only checks duplicate names, so this row is reachable. The mkdir spy makes
     // the failure deterministic on every platform (Linux would accept the name).
-    const broken = createFolder(db, batch.id, 'broken?name')
+    const broken = { id: insertFolderRow(db, batch.id, 'broken?name') }
     const pick = createFolder(db, batch.id, '精选')
     const fixture = makeFixtureTree()
     await importFixture(db, batch.id, fixture.root)

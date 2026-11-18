@@ -107,6 +107,9 @@ function migrate(db: Database): void {
 function init(db: Database): void {
   db.pragma('foreign_keys = ON')
   db.pragma('journal_mode = WAL')
+  // Wait up to 5s on WAL contention instead of throwing SQLITE_BUSY, so a
+  // second instance or a slow checkpoint cannot crash a write transaction.
+  db.pragma('busy_timeout = 5000')
   migrate(db)
 }
 

@@ -63,7 +63,34 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-app.whenReady().then(() => {
+// Single-instance gate (backlog I3): a second launch must not open another
+// process against the same SQLite WAL/cache files and race on .tmp writes.
+const singleInstanceLock = app.requestSingleInstanceLock()
+if (!singleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = mainWindow
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
+
+  app
+    .whenReady()
+    .then(bootstrap)
+    .catch((err: unknown) => {
+      // Surface a startup failure instead of leaving the app hanging with no window.
+      dialog.showErrorBox(
+        '择影启动失败',
+        err instanceof Error ? err.stack ?? err.message : String(err)
+      )
+      app.quit()
+    })
+}
+
+function bootstrap(): void {
   const userData = app.getPath('userData')
   const { db: openedDb, recovered } = openDatabase(path.join(userData, 'selight.db'))
   db = openedDb
@@ -268,14 +295,7 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
   })
-}).catch((err: unknown) => {
-  // Surface a startup failure instead of leaving the app hanging with no window.
-  dialog.showErrorBox(
-    '择影启动失败',
-    err instanceof Error ? err.stack ?? err.message : String(err)
-  )
-  app.quit()
-})
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

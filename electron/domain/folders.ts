@@ -27,6 +27,60 @@ export class FolderNameConflictError extends Error {
   }
 }
 
+export class FolderNameInvalidError extends Error {
+  constructor(name: string, reason: string) {
+    super(`invalid folder name "${name}": ${reason}`)
+    this.name = 'FolderNameInvalidError'
+  }
+}
+
+// Windows device names that cannot name a filesystem entry, case-insensitive,
+// including the "<name>.<ext>" form (CON.txt still resolves to the device).
+// Scope follows the backlog spec (COM/LPT 1-9); COM0/LPT0 and higher numbers
+// plus ASCII control chars are not enumerated here — the export mkdir guard
+// still contains those failures as defense in depth.
+const RESERVED_NAMES = new Set([
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`)
+])
+const FORBIDDEN_CHARS = /[?*|<>"\/\\]/
+
+/**
+ * Domain folder-name rule. Returns null when the name is usable, otherwise an
+ * English reason string; callers map it to localized UI text. Trims whitespace
+ * so the stored name and the validation see the same value. Trailing dots or
+ * spaces are rejected: Win32 strips them when creating directories, so two
+ * distinct stored names would silently merge on export.
+ */
+export function validateFolderName(rawName: string): string | null {
+  // Check the untrimmed input: Win32 strips trailing dots/spaces at the
+  // filesystem boundary, so after trim they would be invisible and two
+  // distinct rows could merge into one export directory.
+  if (/[.\s]$/.test(rawName)) {
+    return 'folder name must not end with a dot or space'
+  }
+  const name = rawName.trim()
+  if (name === '') return 'folder name must not be empty'
+  if (name === '.' || name === '..') return 'dot names are reserved'
+  if (FORBIDDEN_CHARS.test(name)) {
+    return 'folder name contains a forbidden character (? * | < > " / \\)'
+  }
+  const base = name.split('.')[0].toUpperCase()
+  if (RESERVED_NAMES.has(base)) return 'reserved Windows device name'
+  return null
+}
+
+function assertValidFolderName(rawName: string): string {
+  const name = rawName.trim()
+  const reason = validateFolderName(name)
+  if (reason !== null) throw new FolderNameInvalidError(name, reason)
+  return name
+}
+
 function mapRow(row: FolderSnake): FolderRow {
   return {
     id: row.id,
@@ -45,8 +99,11 @@ function getFolder(db: Database, id: number): FolderRow {
   return mapRow(row)
 }
 
-export function createFolder(db: Database, batchId: number, name: string): FolderRow {
+export function createFolder(db: Database, batchId: number, rawName: string): FolderRow {
   const insert = db.transaction((): number => {
+    // Normalize once at the boundary so conflict checks and stored rows all
+    // see the trimmed name; padded variants then correctly collide.
+    const name = assertValidFolderName(rawName)
     const conflict = db
       .prepare(
         'SELECT 1 FROM folders WHERE batch_id = ? AND name = ? AND deleted_at IS NULL'
@@ -69,8 +126,9 @@ export function createFolder(db: Database, batchId: number, name: string): Folde
   return getFolder(db, insert())
 }
 
-export function renameFolder(db: Database, id: number, name: string): void {
+export function renameFolder(db: Database, id: number, rawName: string): void {
   db.transaction(() => {
+    const name = assertValidFolderName(rawName)
     const conflict = db
       .prepare(
         'SELECT 1 FROM folders WHERE batch_id = (SELECT batch_id FROM folders WHERE id = ?) AND name = ? AND deleted_at IS NULL AND id != ?'
