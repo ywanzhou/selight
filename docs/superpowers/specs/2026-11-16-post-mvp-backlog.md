@@ -31,6 +31,8 @@
 - **单实例锁 macOS 边界（2026-11-18 评审登记）**：window-all-closed 后 mac 上 app 保活但 mainWindow=null，此时 second-instance 提前 return 不建窗，要等 dock activate 才恢复；mac 适配轮处理。
 - **legacy 非法名文件夹重命名（2026-11-18 评审登记）**：历史行若含现规则下非法的名字，rename 到自身会抛 FolderNameInvalidError，必须改成新名才能关闭对话框；无数据风险，#8 做中文错误映射时一并优化提示。
 - 文件夹名校验范围说明：仅枚举 COM/LPT 1–9 与 CON/PRN/AUX/NUL，COM0/LPT0、更高编号与 ASCII 控制字符未列名拒绝，由导出 mkdir 失败清单兜底。
+- **弹层焦点陷阱（2026-11-18 工具栏重构评审登记，即上文渲染层条目「右键菜单 focus trap」的完整版）**：BatchPicker 与 FolderContextMenu 同构——打开期间在 window capture 阶段对全部键 `stopPropagation`，Tab 未被拦截所以焦点能移出弹层，但弹层不关闭、capture 监听仍在，用户 Tab 回缩略图网格后按数字键分类会被静默吞掉，直到 Esc 或外部点击。修法：加 `focusout` 关闭（带 `relatedTarget` 仍在根节点内的守卫，避免选项间移焦误关），两个组件同一轮改。
+- **批次选择器首字母跳转（2026-11-18 工具栏重构评审登记）**：原生 `<select>` 自带的 type-ahead（敲首字母跳到对应选项）在自定义 BatchPicker 改造中丢失，现仅支持 ↑/↓/Enter/Esc。批次按 lastOpened 排序且通常不多，影响有限；补回时把按键匹配逻辑写成 `state/batchPicker.ts` 的 DOM-free 纯函数（输入串 + 批次名列表 → 目标下标），随表驱动测试一起进。
 
 ## 发行前必做
 
