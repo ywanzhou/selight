@@ -76,6 +76,15 @@ export class ExiftoolReader implements ExifReader {
     }
   }
 
+  // Per-output in-flight de-dupe. main.ts shares one reader instance across the
+  // thumbnail and preview queues, both of which extract the same RAW through
+  // here. Without this gate two workers extract in parallel and write the same
+  // <id>.jpg.tmp; one rename steals the other's tmp, the loser's atomicWrite
+  // then fails with ENOENT and ensurePreview degrades the 2048 preview to a
+  // permanent placeholder. Keyed by absolute output path so distinct photos and
+  // cache dirs never block each other.
+  private readonly inflight = new Map<string, Promise<string>>()
+
   async ensureRawPreview(
     photo: { id: number; absPath: string; orientation: number },
     cacheDir: string
@@ -88,6 +97,20 @@ export class ExiftoolReader implements ExifReader {
       // Not cached yet: fall through to extraction.
     }
 
+    const running = this.inflight.get(out)
+    if (running !== undefined) return running
+
+    const task = this.extractTo(photo, out).finally(() => {
+      this.inflight.delete(out)
+    })
+    this.inflight.set(out, task)
+    return task
+  }
+
+  private async extractTo(
+    photo: { id: number; absPath: string; orientation: number },
+    out: string
+  ): Promise<string> {
     const extracted = await this.extractPreview(photo.absPath)
     // Embedded previews carry no EXIF orientation tag: the source ARW's
     // orientation drives an explicit sharp rotation. angle 0 is a lossless
@@ -98,7 +121,7 @@ export class ExiftoolReader implements ExifReader {
       angle === 0
         ? extracted
         : await sharp(extracted).rotate(angle).jpeg({ quality: 100 }).toBuffer()
-    await fs.mkdir(cacheDir, { recursive: true })
+    await fs.mkdir(path.dirname(out), { recursive: true })
     // Sibling .tmp + rename: a crash mid-write cannot leave a truncated preview
     // that the access()-based cache check above would serve forever.
     const tmp = `${out}.tmp`

@@ -232,4 +232,37 @@ describe('ExiftoolReader.ensureRawPreview', () => {
       reader.ensureRawPreview({ id: 8, absPath: 'x.arw', orientation: 6 }, cacheDir)
     ).rejects.toBeInstanceOf(RawPreviewError)
   })
+
+  it('deduplicates concurrent calls for the same output into one extraction', async () => {
+    const cacheDir = makeCacheDir()
+    const source = await sharp({
+      create: {
+        width: 640,
+        height: 480,
+        channels: 3,
+        background: { r: 10, g: 20, b: 30, alpha: 1 }
+      }
+    })
+      .jpeg()
+      .toBuffer()
+    const fake = makeFake({ orientation: 1, preview: () => source })
+    const reader = new ExiftoolReader({
+      read: fake.read,
+      extractBinaryTagToBuffer: fake.extract
+    })
+    const photo = { id: 11, absPath: 'x.arw', orientation: 1 }
+    const expected = path.join(cacheDir, '11.jpg')
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => reader.ensureRawPreview(photo, cacheDir))
+    )
+
+    expect(results.every((out) => out === expected)).toBe(true)
+    expect(fs.existsSync(expected)).toBe(true)
+    expect(fake.extract).toHaveBeenCalledTimes(1)
+
+    // A later call after the in-flight map cleared serves the file from cache.
+    expect(await reader.ensureRawPreview(photo, cacheDir)).toBe(expected)
+    expect(fake.extract).toHaveBeenCalledTimes(1)
+  })
 })
