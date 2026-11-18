@@ -1,8 +1,16 @@
 import { useState } from 'react'
 import { useAppStore } from '../state/store'
-import { ExportIcon, ImportIcon, PencilIcon, TrashIcon } from './icons'
+import {
+  BroomIcon,
+  ExportIcon,
+  ImportIcon,
+  PencilIcon,
+  TrashIcon,
+  XmarkIcon
+} from './icons'
 import CreateBatchButton from './CreateBatchButton'
 import InlineNameInput from './InlineNameInput'
+import BatchPicker from './BatchPicker'
 
 function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
@@ -18,7 +26,7 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
     renameBatch,
     cleanupMediaCache
   } = useAppStore()
-  const { batches, batchId, counts, loading, enrichProgress } = state
+  const { batches, batchId, counts, loading } = state
   const [renaming, setRenaming] = useState(false)
   const [importing, setImporting] = useState(false)
   const currentName = batches.find((b) => b.id === batchId)?.name ?? ''
@@ -29,8 +37,6 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
   }
 
   const total = counts?.total ?? 0
-  const classified = total - (counts?.inbox ?? 0)
-  const percent = total > 0 ? (classified / total) * 100 : 0
   // Export only copies status='folder' photos; zero of them means an empty output.
   const nothingToExport = (counts?.folder ?? 0) === 0
 
@@ -79,23 +85,17 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
           />
         </span>
       ) : (
-        <select
-          className="tb-select"
-          value={batchId ?? ''}
-          disabled={batches.length === 0 || loading}
-          onChange={(e) => {
-            openBatch(Number(e.target.value)).catch(showError)
+        <BatchPicker
+          batches={batches}
+          batchId={batchId}
+          loading={loading}
+          onOpen={(id) => {
+            openBatch(id).catch(showError)
           }}
-          aria-label="选择批次"
-        >
-          {batches.length === 0 && <option value="">无批次</option>}
-          {batches.map((batch) => (
-            <option key={batch.id} value={batch.id}>
-              {batch.name}
-            </option>
-          ))}
-        </select>
+        />
       )}
+
+      <span className="tb-divider" aria-hidden="true" />
 
       <button
         type="button"
@@ -110,7 +110,7 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
       <button
         type="button"
-        className="icon-btn"
+        className="icon-btn danger"
         title="删除当前批次"
         aria-label="删除当前批次"
         disabled={batchId === null || loading}
@@ -121,43 +121,51 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
         <TrashIcon />
       </button>
 
-      <CreateBatchButton />
+      <CreateBatchButton icon />
 
-      {/* Text button rather than a second TrashIcon: cache cleanup is safe and
+      <span className="tb-divider" aria-hidden="true" />
+
+      {/* Broom rather than a second trash icon: cache cleanup is safe and
           reversible, unlike the adjacent destructive batch-delete action. */}
       <button
         type="button"
-        className="tb-btn"
+        className="icon-btn"
         title="清理失效的缩略图与预览缓存"
+        aria-label="清理失效的缩略图与预览缓存"
         disabled={loading}
         onClick={() => {
           handleCleanupCache().catch(showError)
         }}
       >
-        清缓存
+        <BroomIcon />
       </button>
+
+      <span className="tb-divider" aria-hidden="true" />
 
       {importing ? (
         <button
           type="button"
-          className="tb-btn"
+          className="icon-btn accent"
+          title="取消导入"
+          aria-label="取消导入"
           onClick={() => {
             handleCancelImport().catch(showError)
           }}
         >
-          取消导入
+          <XmarkIcon />
         </button>
       ) : (
         <button
           type="button"
-          className="tb-btn"
+          className="icon-btn"
+          title="导入文件夹"
+          aria-label="导入文件夹"
           disabled={batchId === null || loading}
           onClick={() => {
             handleImport().catch(showError)
           }}
         >
           <ImportIcon />
-          导入文件夹
         </button>
       )}
 
@@ -169,35 +177,15 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
       >
         <button
           type="button"
-          className="tb-btn"
+          className="icon-btn"
+          title="导出"
+          aria-label="导出"
           disabled={batchId === null || loading || nothingToExport}
           onClick={onExport}
         >
           <ExportIcon />
-          导出
         </button>
       </span>
-
-      {enrichProgress !== null && (
-        <span className="tb-enrich" role="status">
-          正在处理 {enrichProgress.done}/{enrichProgress.total}
-        </span>
-      )}
-
-      <div className="tb-progress">
-        <span>
-          已分 {classified} / 共 {total}
-        </span>
-        <div
-          className="bar"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-valuenow={classified}
-        >
-          <i style={{ width: `${percent}%` }} />
-        </div>
-      </div>
     </header>
   )
 }

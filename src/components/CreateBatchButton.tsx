@@ -7,10 +7,15 @@ function showError(e: unknown): void {
   window.alert(e instanceof Error ? e.message : String(e))
 }
 
+interface CreateBatchButtonProps {
+  // Toolbar renders the bare icon form; the empty state keeps the labeled CTA.
+  icon?: boolean
+}
+
 // One control for both the toolbar and the empty state: click swaps the button
 // for an inline input. A blank entry falls through to the backend date name;
 // Esc cancels before anything is created.
-export default function CreateBatchButton() {
+export default function CreateBatchButton({ icon = false }: CreateBatchButtonProps = {}) {
   const { state, createBatch } = useAppStore()
   const [naming, setNaming] = useState(false)
 
@@ -27,6 +32,21 @@ export default function CreateBatchButton() {
           onCancel={() => setNaming(false)}
         />
       </span>
+    )
+  }
+
+  if (icon) {
+    return (
+      <button
+        type="button"
+        className="icon-btn"
+        title="新建批次"
+        aria-label="新建批次"
+        disabled={state.loading}
+        onClick={() => setNaming(true)}
+      >
+        <PlusIcon />
+      </button>
     )
   }
 

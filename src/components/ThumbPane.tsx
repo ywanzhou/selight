@@ -6,6 +6,7 @@ import { useSelectionContext } from '../state/selectionContext'
 import { DROP_MIME } from '../state/drop'
 import { anchorRowIndex, cellWidth } from '../state/gridGeometry'
 import GridCell, { type ThumbCellData } from './ThumbCell'
+import SidebarProgress from './SidebarProgress'
 import { ChevronLeftIcon } from './icons'
 
 // Two columns, 10px gaps, 3:2 thumbs. The cell width is measured from the
@@ -262,6 +263,10 @@ export default function ThumbPane() {
           />
         </div>
       )}
+
+      {/* Pinned below the grid (and below the empty-state text): batch-wide
+          progress stays visible in inbox, folder and trash views alike. */}
+      <SidebarProgress />
     </aside>
   )
 }

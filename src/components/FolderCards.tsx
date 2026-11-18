@@ -188,17 +188,10 @@ export default function FolderCards() {
 
   return (
     <aside className="sidebar right frosted hairline-left">
+      {/* The only create entry is the dashed .new-card at the grid's end, which
+          also hosts the inline naming input; a header plus button duplicated it. */}
       <div className="side-head">
         <span>文件夹</span>
-        <button
-          type="button"
-          className="icon-btn"
-          title="新建文件夹"
-          aria-label="新建文件夹"
-          onClick={startCreate}
-        >
-          <PlusIcon />
-        </button>
       </div>
 
       <div className="cards">
