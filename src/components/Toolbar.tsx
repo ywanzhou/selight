@@ -178,8 +178,8 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
         <button
           type="button"
           className="icon-btn"
-          title="导出"
-          aria-label="导出"
+          title="导出分类清单"
+          aria-label="导出分类清单"
           disabled={batchId === null || loading || nothingToExport}
           onClick={onExport}
         >

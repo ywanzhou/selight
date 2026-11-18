@@ -926,50 +926,16 @@ button:disabled {
   text-align: center;
 }
 
-.export-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-
-.export-bar {
-  width: 100%;
-  height: 6px;
-}
-
-.export-count {
+/* Manifest result dialog: the written file's path and the missing-source warning. */
+.export-target {
   font-size: 12px;
-  color: var(--color-secondary);
-  text-align: center;
-}
-
-.export-failures {
-  margin: -6px 0 16px;
-  padding: 8px 10px;
-  border: var(--hairline-strong);
-  border-radius: var(--radius-control);
-  background: var(--bg-control);
-  font-size: 12px;
-  color: var(--color-secondary);
-}
-
-.export-failures span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--color-label);
-}
-
-.export-failures ul {
-  margin: 0;
-  padding-left: 16px;
-  max-height: 96px;
-  overflow: auto;
-}
-
-.export-failures li {
-  margin: 2px 0;
+  color: var(--color-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.export-missing {
+  font-size: 12px;
+  color: #d70015;
 }

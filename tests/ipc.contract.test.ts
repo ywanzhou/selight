@@ -8,6 +8,7 @@ import { createHandlers, type HandlerDeps } from '../electron/ipc'
 import type { MediaQueue } from '../electron/media/queue'
 import type { SessionState, SessionStore } from '../electron/session'
 import { IPC_CHANNELS, type SelightApi, type SelightHandlers } from '../electron/shared/api'
+import type { Manifest } from '../electron/manifest'
 
 // This suite is the end-to-end domain chain driven through the pure handler factory.
 // It must never import electron: createHandlers takes every dependency (db, queue,
@@ -24,7 +25,6 @@ interface Setup {
   enrichment: { submit: (ids: number[]) => void; cancel: ReturnType<typeof vi.fn>; stop: () => void }
   retryCalls: { thumb: number[][]; photo: number[][] }
   sessionStore: SessionStore
-  progressCalls: Array<[number, number]>
   mediaRoots: { thumbDir: string; previewDir: string }
 }
 
@@ -73,15 +73,13 @@ function setup(): Setup {
     flush: vi.fn()
   }
 
-  const progressCalls: Array<[number, number]> = []
   const deps: HandlerDeps = {
     db,
     thumbQueue,
     enrichment,
     retry,
     mediaRoots,
-    sessionStore,
-    onExportProgress: (done, total) => progressCalls.push([done, total])
+    sessionStore
   }
   return {
     handlers: createHandlers(deps),
@@ -91,7 +89,6 @@ function setup(): Setup {
     enrichment,
     retryCalls,
     sessionStore,
-    progressCalls,
     mediaRoots
   }
 }
@@ -511,9 +508,9 @@ describe('IPC handler contract — full curation chain', () => {
   })
 })
 
-describe('IPC handler contract — export', () => {
-  it('exports folder photos through the handler with progress and excludes trash/empty folders', async () => {
-    const { handlers, progressCalls } = setup()
+describe('IPC handler contract — export manifest', () => {
+  it('writes a manifest with folder grouping, posix relative paths and trash/empty-folder exclusion', async () => {
+    const { handlers } = setup()
     const batch = await handlers.createBatch()
     const pick = await handlers.createFolder(batch.id, '精选')
     const travel = await handlers.createFolder(batch.id, '旅行')
@@ -533,21 +530,32 @@ describe('IPC handler contract — export', () => {
 
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-ipc-export-'))
     dirs.push(output)
-    const result = await handlers.exportBatch(batch.id, output)
+    const target = path.join(output, 'manifest.json')
+    const result = await handlers.exportManifest(batch.id, target)
 
-    expect(result).toEqual({ copied: 3, failures: [] })
-    expect(fs.readdirSync(output, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()).toEqual(['旅行', '精选'])
-    expect(fs.readdirSync(path.join(output, '精选')).sort()).toEqual(['a.jpg', 'b.png'])
-    expect(fs.readdirSync(path.join(output, '旅行'))).toEqual(['c.webp'])
-    expect(walkFiles(output).map((f) => path.basename(f))).not.toContain('d.arw')
+    expect(result).toEqual({
+      targetPath: target,
+      folderCount: 2,
+      photoCount: 3,
+      missingCount: 0
+    })
 
-    // The injected seam receives one call per settled file, ending at done === total.
-    expect(progressCalls).toHaveLength(3)
-    expect(progressCalls.at(-1)).toEqual([3, 3])
+    const manifest = JSON.parse(fs.readFileSync(target, 'utf8')) as Manifest
+    expect(manifest.kind).toBe('selight-manifest')
+    expect(manifest.sources).toEqual([
+      { id: manifest.sources[0]?.id, root: root.split(path.sep).join('/') }
+    ])
+    expect(manifest.folders.map((f) => f.name).sort()).toEqual(['旅行', '精选'])
+    const travelGroup = manifest.folders.find((f) => f.name === '旅行')!
+    expect(travelGroup.photos.map((p) => p.filename)).toEqual(['c.webp'])
+    expect(travelGroup.photos[0].path).toBe('sub/c.webp')
+    const allNames = manifest.folders.flatMap((f) => f.photos.map((p) => p.filename))
+    expect(allNames).not.toContain('d.arw')
+    expect(walkFiles(output).map((f) => path.basename(f))).not.toContain('manifest.json.tmp')
   })
 
-  it('returns missing-source paths in failures without abort the run', async () => {
-    const { handlers } = setup()
+  it('keeps DB-flagged missing photos in the manifest with missing:true and counts them', async () => {
+    const { handlers, db } = setup()
     const batch = await handlers.createBatch()
     const folder = await handlers.createFolder(batch.id, '精选')
     const root = makeFixtureTree()
@@ -558,15 +566,19 @@ describe('IPC handler contract — export', () => {
       folder.id
     )
     const victim = inbox.find((p) => p.filename === 'b.png')!
-    fs.rmSync(victim.absPath)
+    // The manifest never touches disk: missing is a database flag set by re-scan,
+    // not a runtime fs check, so flip it directly to simulate that state.
+    db.prepare('UPDATE photos SET missing = 1 WHERE id = ?').run(victim.id)
 
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-ipc-export-'))
     dirs.push(output)
-    const result = await handlers.exportBatch(batch.id, output)
+    const target = path.join(output, 'manifest.json')
+    const result = await handlers.exportManifest(batch.id, target)
 
-    expect(result.copied).toBe(3)
-    expect(result.failures).toEqual([victim.absPath])
-    expect(fs.readdirSync(path.join(output, '精选'))).not.toContain('b.png')
+    expect(result.missingCount).toBe(1)
+    const manifest = JSON.parse(fs.readFileSync(target, 'utf8')) as Manifest
+    const entry = manifest.folders[0].photos.find((p) => p.filename === 'b.png')!
+    expect(entry.missing).toBe(true)
   })
 })
 
@@ -588,22 +600,23 @@ describe('window.selight db-recovery push surface', () => {
     expect(typeof probe).toBe('function')
   })
 
-  it('pins the export channels, dialog/shell seams and progress subscription shape', () => {
-    expect(IPC_CHANNELS.exportBatch).toBe('selight:export:batch')
-    expect(IPC_CHANNELS.exportProgress).toBe('selight:export:progress')
-    expect(IPC_CHANNELS.dialogPickExportDirectory).toBe(
-      'selight:dialog:pick-export-directory'
+  it('pins the manifest export channels and the dialog/shell seam shapes', () => {
+    expect(IPC_CHANNELS.exportManifest).toBe('selight:export:manifest')
+    expect(IPC_CHANNELS.dialogPickExportFile).toBe(
+      'selight:dialog:pick-export-file'
     )
     expect(IPC_CHANNELS.shellOpenPath).toBe('selight:shell:open-path')
 
     // Structural probes, enforced by tsc against the SelightApi bridge contract.
-    const picker: SelightApi['pickExportDirectory'] = async () => null
+    const picker: SelightApi['pickExportFile'] = async () => null
     const opener: SelightApi['openPath'] = async () => undefined
-    const subscribe: SelightApi['onExportProgress'] = (cb) => {
-      cb({ done: 1, total: 2 })
-      return () => {}
-    }
-    expect([typeof picker, typeof opener, typeof subscribe]).toEqual([
+    const exporter: SelightApi['exportManifest'] = async () => ({
+      targetPath: 'x.json',
+      folderCount: 0,
+      photoCount: 0,
+      missingCount: 0
+    })
+    expect([typeof picker, typeof opener, typeof exporter]).toEqual([
       'function',
       'function',
       'function'

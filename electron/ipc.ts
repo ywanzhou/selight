@@ -21,7 +21,7 @@ import {
 } from './domain/classify'
 import { undoLastGroup } from './domain/actions'
 import { importScanned, scanDirectory } from './scanner'
-import { exportBatch as runExport } from './exporter'
+import { exportManifest as runExportManifest } from './manifest'
 import type { EnrichmentService } from './media/enrich'
 import type { MediaQueue } from './media/queue'
 import { runCacheCleanup } from './media/cacheGc'
@@ -49,9 +49,6 @@ export interface HandlerDeps {
   /** Cache roots for best-effort thumbnail/preview cleanup when a batch is deleted. */
   mediaRoots: MediaRoots
   sessionStore: Pick<SessionStore, 'read' | 'write'>
-  // Renderer push has no place in the pure factory: main.ts injects webContents.send,
-  // contract tests inject a recording stub.
-  onExportProgress: (done: number, total: number) => void
 }
 
 // 500 bound variables per statement, matching the scanner/photos chunking and staying
@@ -96,8 +93,7 @@ function photoIdsForPaths(db: Database, batchId: number, paths: string[]): numbe
 }
 
 export function createHandlers(deps: HandlerDeps): SelightHandlers {
-  const { db, thumbQueue, enrichment, retry, mediaRoots, sessionStore, onExportProgress } =
-    deps
+  const { db, thumbQueue, enrichment, retry, mediaRoots, sessionStore } = deps
   // One discovery scan at a time (the renderer disables the import button
   // in-flight); cancelImport aborts this and drops queued enrichment work.
   let scanAbort: AbortController | null = null
@@ -247,8 +243,8 @@ export function createHandlers(deps: HandlerDeps): SelightHandlers {
     },
 
     // ---- export -----------------------------------------------------------
-    async exportBatch(batchId, outputDir) {
-      return runExport(db, batchId, outputDir, onExportProgress)
+    async exportManifest(batchId, targetPath) {
+      return runExportManifest(db, batchId, targetPath)
     },
 
     // ---- session ----------------------------------------------------------

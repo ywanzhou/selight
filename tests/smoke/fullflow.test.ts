@@ -17,7 +17,7 @@ import { counts, listPhotos, type PhotoStatus } from '../../electron/domain/phot
 import { assignToFolder, moveToTrash } from '../../electron/domain/classify'
 import { undoLastGroup } from '../../electron/domain/actions'
 import { importScanned, scanDirectory, type ScannedFile } from '../../electron/scanner'
-import { exportBatch } from '../../electron/exporter'
+import { exportManifest, type Manifest } from '../../electron/manifest'
 import {
   createThumbnailQueue,
   ensureThumbnail,
@@ -112,7 +112,7 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
   let batchId = -1
   let thumbDir = ''
   let previewDir = ''
-  let exportDir = ''
+  let exportTarget = ''
   let scanned: ScannedFile[] = []
 
   beforeAll(() => {
@@ -122,8 +122,9 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     db = openDatabase(dbFile).db
     thumbDir = path.join(root, 'thumbs')
     previewDir = path.join(root, 'previews')
-    exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-smoke-export-'))
+    const exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selight-smoke-export-'))
     dirs.push(exportDir)
+    exportTarget = path.join(exportDir, 'manifest.json')
     batchId = createBatch(db, 'smoke batch').id
   })
 
@@ -629,8 +630,8 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
     expect(percentile(totals, 0.95)).toBeGreaterThan(0)
   })
 
-  // ---------------------------------------------------------------- 7. export
-  slowIt('exports folder photos into temp subdirs, excludes trash, and never mutates the corpus', async () => {
+  // ---------------------------------------------------------------- 7. export manifest
+  slowIt('writes the manifest with folder grouping, excludes trash, and never mutates the corpus', async () => {
     // A fresh trash group gives the exclusion assertion something real to catch.
     const rng = mulberry32(SEED + 2)
     const inboxIds = shuffle(
@@ -668,31 +669,34 @@ suite('smoke: real 素材 corpus full flow (webp, ~1.9k photos)', () => {
          WHERE status = 'folder' AND batch_id = ? GROUP BY folder_id`
       )
       .all(batchId) as { folderId: number; n: number }[]
-    const expectedCopied = expectedGroups.reduce((sum, g) => sum + g.n, 0)
+    const expectedCount = expectedGroups.reduce((sum, g) => sum + g.n, 0)
 
     const t0 = performance.now()
-    const result = await exportBatch(db, batchId, exportDir)
+    const result = await exportManifest(db, batchId, exportTarget)
     // eslint-disable-next-line no-console
     console.log(
-      `[smoke] exportBatch copied ${result.copied} files in ${round1(performance.now() - t0)}ms`
+      `[smoke] exportManifest wrote ${result.photoCount} entries in ${round1(performance.now() - t0)}ms`
     )
 
-    expect(result.failures).toEqual([])
-    expect(result.copied).toBe(expectedCopied)
+    expect(result.folderCount).toBe(expectedGroups.length)
+    expect(result.photoCount).toBe(expectedCount)
 
-    const subdirs = fs
-      .readdirSync(exportDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-    expect(subdirs).toHaveLength(expectedGroups.length)
+    const manifest = JSON.parse(fs.readFileSync(exportTarget, 'utf8')) as Manifest
+    expect(manifest.kind).toBe('selight-manifest')
     const namesById = new Map(
       listFolders(db, batchId).map((f) => [f.id, f.name] as const)
     )
+    expect(manifest.folders.map((f) => f.name).sort()).toEqual(
+      expectedGroups.map((g) => namesById.get(g.folderId)!).sort()
+    )
     for (const group of expectedGroups) {
-      const dir = path.join(exportDir, namesById.get(group.folderId)!)
-      expect(fs.readdirSync(dir)).toHaveLength(group.n)
+      const entry = manifest.folders.find((f) => f.id === group.folderId)!
+      expect(entry.photos).toHaveLength(group.n)
     }
 
-    const exportedNames = new Set(walkFiles(exportDir, false).map((f) => path.basename(f)))
+    const exportedNames = new Set(
+      manifest.folders.flatMap((f) => f.photos.map((p) => p.filename))
+    )
     for (const name of trashedNames) expect(exportedNames.has(name)).toBe(false)
 
     // Source corpus: sampled size/mtime unchanged and the full file set identical.
