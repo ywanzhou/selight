@@ -51,7 +51,7 @@ describe('openDatabase schema', () => {
     expect(open(file).recovered).toBe(false)
   })
 
-  it('enables foreign keys, WAL, busy timeout and writes user_version', () => {
+  it('enables foreign keys, WAL, busy timeout, in-memory temp store and writes user_version', () => {
     const file = path.join(tempDir(), 'selight.db')
     const { db } = open(file)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
@@ -59,7 +59,52 @@ describe('openDatabase schema', () => {
     // Two app instances can briefly contend on the WAL file; wait instead of
     // throwing SQLITE_BUSY immediately (backlog I3).
     expect(db.pragma('busy_timeout', { simple: true })).toBe(5000)
+    // 2 = MEMORY. A file-backed temp store (0/1) spills etilqs_* into %TEMP%, which a
+    // DLP-locked electron binary cannot open, turning large deletes into SQLITE_CANTOPEN.
+    expect(db.pragma('temp_store', { simple: true })).toBe(2)
     expect(db.pragma('user_version', { simple: true })).toBe(2)
+  })
+
+  it('runs a large multi-table delete in one transaction with the in-memory temp store', () => {
+    const file = path.join(tempDir(), 'selight.db')
+    const { db } = open(file)
+    const batchId = db.prepare('INSERT INTO batches (name) VALUES (?)').run('big').lastInsertRowid as number
+    const sourceId = db
+      .prepare('INSERT INTO sources (batch_id, abs_path) VALUES (?, ?)')
+      .run(batchId, path.join(tempDir(), 'src'))
+      .lastInsertRowid as number
+    const insertPhoto = db.prepare(
+      'INSERT INTO photos (batch_id, source_id, abs_path, filename, ext, size_bytes, mtime, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+    const tx = db.transaction((count: number) => {
+      for (let i = 0; i < count; i++) {
+        insertPhoto.run(
+          batchId,
+          sourceId,
+          `p/${i}.jpg`,
+          `${i}.jpg`,
+          '.jpg',
+          1,
+          0,
+          'inbox'
+        )
+      }
+    })
+    tx(3000)
+    expect(db.prepare('SELECT COUNT(*) AS c FROM photos').get() as { c: number }).toMatchObject({
+      c: 3000
+    })
+    // Same FK-ordered shape as domain deleteBatch; must not need any on-disk temp file.
+    db.transaction(() => {
+      db.prepare('DELETE FROM actions WHERE batch_id = ?').run(batchId)
+      db.prepare('DELETE FROM photos WHERE batch_id = ?').run(batchId)
+      db.prepare('DELETE FROM folders WHERE batch_id = ?').run(batchId)
+      db.prepare('DELETE FROM sources WHERE batch_id = ?').run(batchId)
+      db.prepare('DELETE FROM batches WHERE id = ?').run(batchId)
+    })()
+    expect(db.prepare('SELECT COUNT(*) AS c FROM photos').get() as { c: number }).toMatchObject({
+      c: 0
+    })
   })
 
   it('defines UNIQUE(batch_id, abs_path) indexes on photos and sources', () => {

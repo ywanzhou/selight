@@ -110,6 +110,12 @@ function init(db: Database): void {
   // Wait up to 5s on WAL contention instead of throwing SQLITE_BUSY, so a
   // second instance or a slow checkpoint cannot crash a write transaction.
   db.pragma('busy_timeout = 5000')
+  // Keep temp b-trees in RAM. Corporate DLP agents can block the unsigned electron
+  // binary from writing %TEMP%; a large transaction (e.g. deleting a batch with
+  // thousands of rows) then spills an etilqs_* temp file there and fails with
+  // SQLITE_CANTOPEN, while small transactions stay in the page cache and succeed.
+  // Local photo libraries are small enough that the extra memory is negligible.
+  db.pragma('temp_store = MEMORY')
   migrate(db)
 }
 
