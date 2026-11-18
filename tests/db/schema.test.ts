@@ -51,11 +51,14 @@ describe('openDatabase schema', () => {
     expect(open(file).recovered).toBe(false)
   })
 
-  it('enables foreign keys, WAL and writes user_version', () => {
+  it('enables foreign keys, WAL, busy timeout and writes user_version', () => {
     const file = path.join(tempDir(), 'selight.db')
     const { db } = open(file)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(String(db.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
+    // Two app instances can briefly contend on the WAL file; wait instead of
+    // throwing SQLITE_BUSY immediately (backlog I3).
+    expect(db.pragma('busy_timeout', { simple: true })).toBe(5000)
     expect(db.pragma('user_version', { simple: true })).toBe(2)
   })
 
