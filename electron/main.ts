@@ -18,6 +18,16 @@ import { createFileSessionStore } from './sessionStore'
 import type { SessionStore } from './session'
 import { IPC_CHANNELS, type MediaKind, type SessionState, type View } from './shared/api'
 
+// Corporate DLP agents (OCular/IP-guard class) both inject into Chromium sandbox
+// children and block the unsigned electron.exe from writing %APPDATA% (0x5). On dev
+// machines that opt in via ELECTRON_DISABLE_SANDBOX, keep userData in the project so
+// the singleton lock, SQLite WAL and caches land on an unmonitored drive. Must run
+// before requestSingleInstanceLock, whose lock file lives in userData. Packaged builds
+// and machines without the env var keep the default per-user location.
+if (!app.isPackaged && process.env['ELECTRON_DISABLE_SANDBOX'] === '1') {
+  app.setPath('userData', path.resolve(__dirname, '../../.dev-userdata'))
+}
+
 let mainWindow: BrowserWindow | null = null
 let db: Database | null = null
 let thumbQueue: MediaQueue | null = null
