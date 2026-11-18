@@ -67,9 +67,20 @@ describe('validateFolderName', () => {
     })
   }
 
-  it('trims surrounding whitespace before checking emptiness but keeps the inner name', () => {
-    expect(validateFolderName('  合影  ')).toBeNull()
+  it('rejects surrounding whitespace but keeps interior spaces', () => {
+    // Trailing/leading whitespace is normalized at the boundary and raw padded
+    // input is rejected so two rows cannot collapse onto one export directory.
+    expect(validateFolderName('  合影  ')).not.toBeNull()
     expect(validateFolderName(' ')).not.toBeNull()
+    expect(validateFolderName('婚礼 合影')).toBeNull()
+  })
+
+  it('rejects trailing dots and spaces that Win32 would silently strip', () => {
+    expect(validateFolderName('a.')).not.toBeNull()
+    expect(validateFolderName('a...')).not.toBeNull()
+    expect(validateFolderName('a ')).not.toBeNull()
+    // Interior dots/spaces remain legal.
+    expect(validateFolderName('a.b c')).toBeNull()
   })
 })
 
@@ -84,6 +95,23 @@ describe('folder domain module', () => {
     expect(() => renameFolder(db, folder.id, '..')).toThrowError(FolderNameInvalidError)
     // A failed validation leaves no rows behind and does not touch the existing folder.
     expect(listFolders(db, batch.id).map((f) => f.name)).toEqual(['正常'])
+  })
+
+  it('normalizes surrounding whitespace at the boundary and conflicts on the stored name', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    // Leading/trailing whitespace is trimmed once, at the domain boundary.
+    const folder = createFolder(db, batch.id, '  合影  ')
+    expect(folder.name).toBe('合影')
+
+    // A padded variant resolves to the same normalized name and conflicts,
+    // instead of creating a second folder Win32 would merge on export.
+    expect(() => createFolder(db, batch.id, '合影')).toThrowError(FolderNameConflictError)
+    expect(listFolders(db, batch.id)).toHaveLength(1)
+
+    // renameFolder normalizes the same way.
+    renameFolder(db, folder.id, '  精选 ')
+    expect(listFolders(db, batch.id)[0].name).toBe('精选')
   })
 
   it('createFolder starts sortOrder at 1 and increments per batch', () => {

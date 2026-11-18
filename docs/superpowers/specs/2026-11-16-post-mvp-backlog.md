@@ -28,6 +28,9 @@
 - 预览尺寸互换断言随 samples/ 激活自动闭环（harness 已写好）。
 - **cancelImport 作用域（2026-11-17 四期评审登记）**：取消是进程级 EnrichmentService.cancel，导入期间若用户切批次，openBatch 的补偿提交会被一并清掉。无数据错误（下次打开批次重新补偿），但与"只取消本次导入"的直觉有偏差；后续可给导入期间的批次下拉加禁用，或给 cancel 加 scan 关联作用域。
 - 富化进度计数在 in-flight 任务 settle 于 cancel 之后时可能产生瞬时 done>total 事件（仅工具栏展示影响，下一事件即纠正）；需要严格单调时改为 cancel 时忽略被清任务的 settle。
+- **单实例锁 macOS 边界（2026-11-18 评审登记）**：window-all-closed 后 mac 上 app 保活但 mainWindow=null，此时 second-instance 提前 return 不建窗，要等 dock activate 才恢复；mac 适配轮处理。
+- **legacy 非法名文件夹重命名（2026-11-18 评审登记）**：历史行若含现规则下非法的名字，rename 到自身会抛 FolderNameInvalidError，必须改成新名才能关闭对话框；无数据风险，#8 做中文错误映射时一并优化提示。
+- 文件夹名校验范围说明：仅枚举 COM/LPT 1–9 与 CON/PRN/AUX/NUL，COM0/LPT0、更高编号与 ASCII 控制字符未列名拒绝，由导出 mkdir 失败清单兜底。
 
 ## 发行前必做
 
