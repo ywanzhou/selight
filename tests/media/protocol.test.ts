@@ -10,6 +10,7 @@ import {
   type MediaRoots,
   type ResolveResult
 } from '../../electron/media/resolve'
+import { mediaErrorResponse, withNoStore } from '../../electron/media/protocolResponses'
 
 const dirs: string[] = []
 const handles: Database[] = []
@@ -278,5 +279,30 @@ describe('resolveMediaPath — photo route (preview cache only, never source byt
     touch(path.join(roots.thumbDir, `${id}.jpg`))
     // @ts-expect-error exercising runtime defence against a bad host segment
     expect(forbidden(resolveMediaPath(db, roots, 'evil', id))).toBe(true)
+  })
+})
+
+describe('selight:// response cache policy', () => {
+  it('marks both 403 and 404 error responses as no-store', () => {
+    const forbidden = mediaErrorResponse(403)
+    expect(forbidden.status).toBe(403)
+    expect(forbidden.headers.get('Cache-Control')).toBe('no-store')
+
+    const missing = mediaErrorResponse(404)
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('Cache-Control')).toBe('no-store')
+  })
+
+  it('adds no-store to a successful response while keeping status, headers and body', async () => {
+    const original = new Response('jpeg-bytes', {
+      status: 200,
+      headers: { 'Content-Type': 'image/jpeg' }
+    })
+
+    const wrapped = withNoStore(original)
+    expect(wrapped.status).toBe(200)
+    expect(wrapped.headers.get('Content-Type')).toBe('image/jpeg')
+    expect(wrapped.headers.get('Cache-Control')).toBe('no-store')
+    expect(await wrapped.text()).toBe('jpeg-bytes')
   })
 })

@@ -2,6 +2,7 @@ import { net, protocol } from 'electron'
 import { pathToFileURL } from 'node:url'
 import type { Database } from 'better-sqlite3'
 import { resolveMediaPath, type MediaRoots } from './resolve'
+import { mediaErrorResponse, withNoStore } from './protocolResponses'
 
 // registerSchemesAsPrivileged must run before app ready, so importing this module
 // from main.ts performs the registration as a load-time side effect.
@@ -32,7 +33,7 @@ export function registerMediaProtocol(
       const url = new URL(request.url)
 
       if (url.hostname !== 'thumb' && url.hostname !== 'photo') {
-        return new Response('Forbidden', { status: 403 })
+        return mediaErrorResponse(403)
       }
       const result = resolveMediaPath(
         db,
@@ -47,15 +48,13 @@ export function registerMediaProtocol(
           if (url.hostname === 'thumb') onThumbMissing(result.id)
           else onPhotoMissing(result.id)
         }
-        return new Response('Not found', {
-          status: result.reason === 'forbidden' ? 403 : 404
-        })
+        return mediaErrorResponse(result.reason === 'forbidden' ? 403 : 404)
       }
 
-      return await net.fetch(pathToFileURL(result.file).href)
+      return withNoStore(await net.fetch(pathToFileURL(result.file).href))
     } catch {
       // Malformed URL or undecodable percent sequence: deny instead of crashing.
-      return new Response('Forbidden', { status: 403 })
+      return mediaErrorResponse(403)
     }
   })
 }
