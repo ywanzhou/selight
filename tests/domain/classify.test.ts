@@ -108,6 +108,42 @@ function photoState(
     .get(photoId) as { status: string; folder_id: number | null }
 }
 
+describe('assignToFolder ownership validation (backlog I6)', () => {
+  it('rejects a folder that belongs to another batch', () => {
+    const db = tempDb()
+    const batchA = createBatch(db, 'A')
+    const batchB = createBatch(db, 'B')
+    const foreignFolder = createFolder(db, batchB.id, 'B 的文件夹')
+    const photoId = addPhoto(db, batchA.id, 'E:/photos/a.jpg')
+
+    expect(() => assignToFolder(db, [photoId], foreignFolder.id)).toThrowError(
+      FolderNotFoundError
+    )
+    // No state change, no audit row.
+    expect(photoState(db, photoId)).toEqual({ status: 'inbox', folder_id: null })
+    expect(actionCount(db)).toBe(0)
+  })
+
+  it('rejects a soft-deleted folder', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const folder = createFolder(db, batch.id, '已删')
+    softDeleteFolder(db, folder.id)
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+
+    expect(() => assignToFolder(db, [photoId], folder.id)).toThrowError(FolderNotFoundError)
+    expect(photoState(db, photoId)).toEqual({ status: 'inbox', folder_id: null })
+    expect(actionCount(db)).toBe(0)
+  })
+
+  it('rejects a non-existent folder id', () => {
+    const db = tempDb()
+    const batch = createBatch(db)
+    const photoId = addPhoto(db, batch.id, 'E:/photos/a.jpg')
+    expect(() => assignToFolder(db, [photoId], 999_999)).toThrowError(FolderNotFoundError)
+  })
+})
+
 describe('classification actions', () => {
   it('assignToFolder moves photos out of inbox into the folder and logs exact from/to rows', () => {
     const db = tempDb()

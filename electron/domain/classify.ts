@@ -51,7 +51,8 @@ function nextGroupId(db: Database, batchId: number): number {
 function applyActions(
   db: Database,
   photoIds: number[],
-  resolveTarget: (photo: PhotoState) => Target
+  resolveTarget: (photo: PhotoState) => Target,
+  targetFolderId?: number
 ): number {
   if (photoIds.length === 0) return 0
 
@@ -63,6 +64,18 @@ function applyActions(
     // batch's photos under a foreign group and corrupt undo scoped by (batch_id, group).
     const batchId = photos[0].batch_id
     if (!photos.every((photo) => photo.batch_id === batchId)) throw new MixedBatchError()
+
+    if (targetFolderId !== undefined) {
+      // Backlog I6: the target folder must exist, be live, and belong to the
+      // same batch as the photos, or classification could write a dangling or
+      // cross-batch folder_id that export would never resolve.
+      const folder = db
+        .prepare('SELECT batch_id, deleted_at FROM folders WHERE id = ?')
+        .get(targetFolderId) as { batch_id: number; deleted_at: number | null } | undefined
+      if (!folder || folder.deleted_at !== null || folder.batch_id !== batchId) {
+        throw new FolderNotFoundError(targetFolderId)
+      }
+    }
 
     const groupId = nextGroupId(db, batchId)
     const now = Date.now()
@@ -97,7 +110,12 @@ export function assignToFolder(
   photoIds: number[],
   folderId: number
 ): number {
-  return applyActions(db, photoIds, () => ({ status: 'folder', folderId }))
+  return applyActions(
+    db,
+    photoIds,
+    () => ({ status: 'folder', folderId }),
+    folderId
+  )
 }
 
 export function moveToTrash(db: Database, photoIds: number[]): number {
