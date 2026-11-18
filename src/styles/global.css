@@ -66,11 +66,15 @@ button:disabled {
 
 /* ---- top toolbar (mockup .toolbar) ---- */
 .toolbar {
+  position: relative;
+  /* backdrop-filter creates a stacking context; without an explicit z-index the
+     later .app-body panes paint over the absolutely-positioned batch menu. */
+  z-index: 10;
   height: var(--toolbar-height);
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 0 16px;
   background: var(--bg-toolbar);
   backdrop-filter: var(--frost-toolbar);
@@ -78,14 +82,13 @@ button:disabled {
   border-bottom: var(--hairline);
 }
 
-.tb-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--color-secondary);
-  white-space: nowrap;
+/* Vertical group separator inside the icon toolbar. */
+.tb-divider {
+  width: 0.5px;
+  height: 20px;
+  margin: 0 6px;
+  flex-shrink: 0;
+  background: var(--color-separator);
 }
 
 /* ---- toolbar button (mockup .tb-btn) ---- */
@@ -125,8 +128,8 @@ button:disabled {
 
 /* ---- bare icon button (mockup .icon-btn) ---- */
 .icon-btn {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -139,7 +142,27 @@ button:disabled {
   color: var(--color-secondary);
 }
 
+/* Destructive and in-progress accents surface only on hover/active state. */
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--color-red);
+}
+
+.icon-btn.accent {
+  color: var(--color-blue);
+}
+
 .icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Sidebar header controls keep the original compact density. */
+.side-head .icon-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.side-head .icon-btn svg {
   width: 14px;
   height: 14px;
 }
@@ -171,11 +194,18 @@ button:disabled {
   color: var(--color-tertiary);
 }
 
-/* ---- native select restyled to the toolbar language ---- */
-.tb-select {
+/* ---- custom batch picker popover (replaces the native select) ---- */
+.batch-picker {
+  position: relative;
+}
+
+.tb-picker-btn {
   height: 28px;
-  max-width: 160px;
-  padding: 0 24px 0 10px;
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 10px;
   border-radius: var(--radius-control);
   border: var(--hairline-strong);
   background: linear-gradient(#ffffff, #f2f2f4);
@@ -183,10 +213,105 @@ button:disabled {
   font-size: 13px;
   color: var(--color-label);
   white-space: nowrap;
+}
+
+.tb-picker-btn:hover:not(:disabled) {
+  background: linear-gradient(#ffffff, #eaeaee);
+}
+
+.tb-picker-btn[aria-expanded='true'] {
+  background: #ececef;
+}
+
+.tb-picker-btn:disabled {
+  color: var(--color-tertiary);
+  background: #f5f5f7;
+  box-shadow: none;
+}
+
+.tb-picker-btn .bp-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tb-select:disabled {
+.tb-picker-btn .bp-chev {
+  flex-shrink: 0;
+  color: var(--color-tertiary);
+}
+
+.batch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 120;
+  min-width: 230px;
+  max-width: 260px;
+  /* The native <select> capped its own OS-drawn list; a long batch history
+     would otherwise paint options below the window where body overflow:hidden
+     makes them unreachable. */
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  border: var(--hairline-strong);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: var(--frost-toolbar);
+  -webkit-backdrop-filter: var(--frost-toolbar);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.batch-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.batch-option:hover,
+.batch-option.active {
+  background: var(--bg-control);
+}
+
+.batch-option:focus {
+  outline: none;
+}
+
+.bo-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-blue);
+}
+
+.bo-check.placeholder {
+  visibility: hidden;
+}
+
+.bo-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.bo-name {
+  display: block;
+  font-size: 13px;
+  color: var(--color-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bo-date {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
   color: var(--color-tertiary);
 }
 
@@ -605,6 +730,36 @@ button:disabled {
   flex: 1;
   min-height: 0;
   padding: 4px 12px 14px;
+}
+
+/* Batch-wide progress pinned to the bottom of the left thumbnail sidebar. */
+.side-progress {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: var(--hairline);
+  background: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  color: var(--color-secondary);
+}
+
+.sp-enrich {
+  color: var(--color-blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-count {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Override the 130px fixed .bar width; column-flex stretch then fills the row. */
+.side-progress .bar {
+  width: auto;
 }
 
 .thumb-cell {

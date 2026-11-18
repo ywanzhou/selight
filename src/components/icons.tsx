@@ -112,6 +112,34 @@ export function TrashIcon(props: IconProps) {
   )
 }
 
+export function XmarkIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2} strokeLinecap="round" {...props}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </Svg>
+  )
+}
+
+// Broom for cache cleanup: deliberately distinct from TrashIcon, since clearing
+// the reversible media cache is not a destructive action.
+export function BroomIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M14.8 3.6 10.4 10.2" />
+      <path d="M7.8 12.2 11.8 9.9l4.6 4.5-4 2.4z" />
+      <path d="M10.4 15.2 8.9 19.6M12.4 16.7l-.3 3.9M14.5 15.6l1.4 4.1" />
+    </Svg>
+  )
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Svg strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M6 9l6 6 6-6" />
+    </Svg>
+  )
+}
+
 export function ChevronLeftIcon(props: IconProps) {
   return (
     <Svg strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
