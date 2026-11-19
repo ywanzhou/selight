@@ -1,4 +1,4 @@
-import { useCallback, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import type { PhotoRow } from '../../electron/shared/api'
 import { useMediaUrl } from '../hooks/useMediaUrl'
 import { useAppStore } from '../state/store'
@@ -14,16 +14,30 @@ function formatSize(sizeBytes: number): string {
 // Always invokes the media hook (rules of hooks); the missing flag or a failed
 // load replaces the image with an explicit state instead of breaking the hook.
 //
-// The parent remounts this per photo via key={photo.id}, so loaded/loadFailed
-// start false on every photo switch. A mount-scoped reset effect must NOT be
-// used here: when navigating back to a cached photo the <img> onLoad (which
-// sets loaded=true) can fire before the passive effect runs, and the effect's
-// setLoaded(false) would then overwrite it with no second onLoad ever coming,
-// pinning the preview on the loading spinner forever.
+// Two reset mechanisms, deliberately split:
+// - Cross-photo navigation remounts this component via the parent's
+//   key={photo.id}, so loaded/loadFailed start false with no effect involved.
+// - Within one photo, the first request can 404 before the on-demand preview is
+//   built; once it is, useMediaUrl bumps a nonce and src gains "?v=". That
+//   in-instance src change must clear loadFailed so the img retries and leaves
+//   the failed state. The effect skips its first run (mount): resetting there
+//   would overwrite a cache-hit onLoad that fired before the passive effect,
+//   pinning a cached preview on the loading spinner forever (see ERROR.md).
 function StageImage({ photo }: { photo: PhotoRow }) {
   const src = useMediaUrl(photo.id, 'photo')
   const [loaded, setLoaded] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  const firstEffect = useRef(true)
+
+  useEffect(() => {
+    if (firstEffect.current) {
+      firstEffect.current = false
+      return
+    }
+    // Nonce-driven reload of the same photo after background generation.
+    setLoaded(false)
+    setLoadFailed(false)
+  }, [src])
 
   const state = derivePreviewState({
     missing: photo.missing === 1,
