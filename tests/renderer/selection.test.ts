@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   createSelection,
   neighborId,
-  nextSelectionId
+  nextSelectionId,
+  sameIdSequence
 } from '../../src/state/selection'
 
 // The selection model is plain TypeScript with no React/DOM imports, so the
@@ -234,5 +235,27 @@ describe('nextSelectionId', () => {
 
   it('defaults to the first remaining photo when the anchor is missing', () => {
     expect(nextSelectionId(IDS, [33], null)).toBe(11)
+  })
+})
+
+describe('sameIdSequence', () => {
+  it('treats two distinct arrays with identical ids in order as equal (folder create/rename refresh)', () => {
+    expect(sameIdSequence([11, 22, 33], [...IDS.slice(0, 3)])).toBe(true)
+  })
+
+  it('returns true for the same reference and for two empty arrays', () => {
+    const ref = [11, 22]
+    expect(sameIdSequence(ref, ref)).toBe(true)
+    expect(sameIdSequence([], [])).toBe(true)
+  })
+
+  it('returns false when length differs, including empty versus non-empty', () => {
+    expect(sameIdSequence([11, 22], [11])).toBe(false)
+    expect(sameIdSequence([], [11])).toBe(false)
+  })
+
+  it('returns false for a different element or a reordered sequence', () => {
+    expect(sameIdSequence([11, 22, 33], [11, 99, 33])).toBe(false)
+    expect(sameIdSequence([11, 22, 33], [33, 22, 11])).toBe(false)
   })
 })

@@ -7,6 +7,7 @@ import {
 import {
   createSelection,
   neighborId,
+  sameIdSequence,
   type SelectionModel,
   type ToggleOptions
 } from '../state/selection'
@@ -29,16 +30,22 @@ export interface SelectionApi {
   pinSelection(id: number | null): void
 }
 
-// Thin React wrapper around the DOM-free pure model. A new orderedIds array
-// identity (view switch or refresh) recreates the model, so selection never
-// leaks across views; onChange mirrors the resulting ids into the store.
+// Thin React wrapper around the DOM-free pure model. The model is recreated
+// only when the id sequence actually changes (view switch, assign/trash
+// refresh), compared by content via sameIdSequence — a content-equal refresh
+// such as creating or renaming a folder keeps the anchor and selection.
+// onChange mirrors the resulting ids into the store.
 export function useSelection(
   orderedIds: number[],
   onChange?: (ids: number[]) => void
 ): SelectionApi {
   const idsRef = useRef(orderedIds)
   const modelRef = useRef<SelectionModel | null>(null)
-  if (modelRef.current === null || idsRef.current !== orderedIds) {
+  // Compare by content, not identity: a folder create/rename re-pulls the same
+  // photo list as a new array, and rebuilding here would drop the anchor and
+  // blank the preview. Only a genuinely different id sequence (view switch,
+  // assign/trash refresh) recreates the model.
+  if (modelRef.current === null || !sameIdSequence(idsRef.current, orderedIds)) {
     idsRef.current = orderedIds
     modelRef.current = createSelection(orderedIds)
   }
@@ -48,10 +55,20 @@ export function useSelection(
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const pendingPinRef = useRef<number | null>(null)
+  // Last id sequence the pin/reset effect actually handled, so content-equal
+  // refreshes skip it entirely (they must not clear the selection mirror).
+  const handledIdsRef = useRef<readonly number[]>([])
+
+  const emit = useCallback(() => {
+    bump()
+    onChangeRef.current?.([...model.selected])
+  }, [model])
 
   // Layout effect (not passive): the pin must land before paint so assign/trash
   // refreshes never flash a one-frame empty selection. Same deps as before.
   useLayoutEffect(() => {
+    if (sameIdSequence(handledIdsRef.current, orderedIds)) return
+    handledIdsRef.current = orderedIds
     const pinned = pendingPinRef.current
     pendingPinRef.current = null
     if (pinned !== null && orderedIds.includes(pinned)) {
@@ -60,12 +77,7 @@ export function useSelection(
     } else {
       onChangeRef.current?.([])
     }
-  }, [orderedIds])
-
-  const emit = useCallback(() => {
-    bump()
-    onChangeRef.current?.([...model.selected])
-  }, [model])
+  }, [orderedIds, model, emit])
 
   const toggle = useCallback(
     (id: number, options?: ToggleOptions) => {

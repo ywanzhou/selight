@@ -18,6 +18,22 @@ export interface SelectionModel {
   clear(): void
 }
 
+/**
+ * Content equality for ordered id sequences: same length and same ids in the
+ * same order. useSelection uses this instead of array identity so a refresh
+ * that re-pulls an unchanged photo list (creating/renaming a folder returns a
+ * new array with the same ids) keeps the existing model and anchor instead of
+ * treating it as a view switch that wipes the selection and blanks the preview.
+ */
+export function sameIdSequence(a: readonly number[], b: readonly number[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 /** Neighbor the selection should move to from anchorId; clamps at both ends. */
 export function neighborId(
   orderedIds: readonly number[],
