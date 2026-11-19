@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FolderRow } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
 import FolderCard from './FolderCard'
@@ -61,7 +62,13 @@ function FolderContextMenu({
     }
   }, [onClose])
 
-  return (
+  // Portal to document.body: the sidebar has backdrop-filter (.frosted), which
+  // per CSS spec makes it the containing block for any descendant position:fixed
+  // element — combined with .sidebar overflow:hidden the menu was offset and
+  // clipped, so the right-click menu never appeared. Rendering outside that
+  // subtree restores viewport-relative fixed positioning; clientX/clientY from
+  // the contextmenu event are then correct as-is.
+  return createPortal(
     <div
       ref={menuRef}
       className="context-menu"
@@ -78,7 +85,8 @@ function FolderContextMenu({
       <button type="button" role="menuitem" className="danger" onClick={onDelete}>
         删除文件夹
       </button>
-    </div>
+    </div>,
+    document.body
   )
 }
 
