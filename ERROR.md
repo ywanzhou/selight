@@ -41,6 +41,17 @@ state       → loading            图片不会再触发第二次 onLoad，永�
 
 组件按 photo.id 重挂载后，state 初始化与 img 加载同属一次挂载，不存在"effect 覆盖先到的 onLoad"的时序窗口。净改动仅 `PreviewPane.tsx` 一个文件。
 
+## 次生回归：删掉重置 effect 后，首次 404 的失败态无法自愈（同日修复）
+
+上面的 key 重挂载修复把 `useEffect(() => { setLoaded(false); setLoadFailed(false) }, [src])` **整个删除**，结果引入新问题：任何照片**首次**预览时缓存尚未生成，协议先回一次 404，img 立刻 `onError` 进入 failed（"预览生成失败"+重试按钮）；主进程随后在后台生成好并通过 `useMediaUrl` 的 nonce 把 src 变成 `?v=1`、img 重新请求到 200，但同一张照片内 `key={photo.id}` 不变、组件不重挂载，`loadFailed` 没有任何地方复位，于是永久卡在失败态。JPG 直读格式生成快，404 与 200 间隔很短，表现为"默认就闪一下预览生成失败"。
+
+最终修法是把两种重置需求明确分开，而不是二选一：
+
+- **跨照片切换**：靠父组件 `key={photo.id}` 重挂载，state 天然初始化，不经过 effect（保留原 loading 竞态修复）。
+- **同一照片实例内的 nonce 重载**：恢复 `[src]` effect 来清 `loadFailed`/`loaded`，但用 `useRef` 标记跳过挂载后的首次执行——首次交给 state 初始化，避免缓存命中时 onLoad 抢跑被 effect 覆盖；只在后台生成完成、src 真正变成 `?v=` 时才复位。
+
+教训：修状态时序 bug 时要分清"**跨组件实例**"与"**同一实例内 prop/url 变化**"两类重置。key 重挂载解决前者，但实例内的异步自愈（404→生成→重载）仍需要一次受控的 effect；用"跳过首次"的 ref 守卫让两者共存，而不是把 effect 一刀切删除。
+
 ## 排查过程与关键判据
 
 走了三段弯路，前两个修复各自解决了真实但不同的问题，都不是本次主症状的根因：
