@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { Grid, useGridRef } from 'react-window'
 import type { PhotoRow, View } from '../../electron/shared/api'
 import { useAppStore } from '../state/store'
@@ -76,7 +76,13 @@ export default function ThumbPane() {
   // that appears inside the grid. Observing both elements catches sidebar
   // resizes (wrap) and scrollbar appear/disappear (grid content box). Re-run
   // on gridKey so a remounted Grid gets observed, and on hasGrid for 0 -> N.
-  useEffect(() => {
+  //
+  // useLayoutEffect + a synchronous first measure paints the real cell width
+  // on the first frame instead of flashing the FALLBACK_CELL_W layout and
+  // then jumping. scrollbar-gutter:stable on the Grid keeps its clientWidth
+  // constant as the vertical scrollbar appears/disappears, so photo-count
+  // changes no longer recompute every cell width (the layout "twitch").
+  useLayoutEffect(() => {
     const wrap = wrapRef.current
     const grid = wrap?.firstElementChild
     if (!wrap || !grid) return
@@ -87,6 +93,7 @@ export default function ThumbPane() {
     const observer = new ResizeObserver(measure)
     observer.observe(wrap)
     observer.observe(grid)
+    measure()
     const raf = requestAnimationFrame(measure)
     return () => {
       observer.disconnect()
@@ -259,7 +266,14 @@ export default function ThumbPane() {
             defaultHeight={600}
             // overflowX guard: measured widths already fit, this only absorbs
             // sub-pixel rounding so no horizontal scrollbar can ever appear.
-            style={{ width: '100%', height: '100%', overflowX: 'hidden' }}
+            // scrollbarGutter reserves a constant vertical-scrollbar slot so
+            // clientWidth (and thus cellW) stays fixed as content grows/shrinks.
+            style={{
+              width: '100%',
+              height: '100%',
+              overflowX: 'hidden',
+              scrollbarGutter: 'stable'
+            }}
           />
         </div>
       )}
